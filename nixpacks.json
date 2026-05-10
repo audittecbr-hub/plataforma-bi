@@ -1,0 +1,15 @@
+{
+    "providers": ["node"],
+    "phases": {
+      "setup": {
+        "nixPkgs": ["nodejs", "git", "ffmpeg", "python3"]
+      },
+      "install": {
+        "cmds": [
+          "npm ci",
+          "rm -rf studio-automation-core",
+          "git clone https://github.com/Senisse19/automacao-bi-rankingmetas.git studio-automation-core"
+        ]
+      }
+    }
+}

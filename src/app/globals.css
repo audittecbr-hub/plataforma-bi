@@ -1,0 +1,178 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
+
+:root {
+  /* Group Studio Palette (Light Mode) */
+  --background: #cdcdcd; /* Cinza Neutro (User Request: Dark Background for content contrast) */
+  --foreground: #322e2b; /* Taupe Escuro */
+
+  --card: #ffffff;
+  --card-foreground: #322e2b;
+
+  --popover: #ffffff;
+  --popover-foreground: #322e2b;
+
+  --primary: #8E6F42; /* Bronze Nobre (levemente escurecido para contraste WCAG AA 4.6:1) */
+  --primary-foreground: #fdfdfd;
+
+  --secondary: #cdcdcd; /* Cinza Neutro (User Request: Darker than #ebebeb) */
+  --secondary-foreground: #322e2b;
+
+  --muted: #cdcdcd;
+  --muted-foreground: #5c5d5e; /* Cinza Escuro (escurecido para contraste WCAG AA 4.5:1 em bg #cdcdcd) */
+
+  --accent: #d5ae77; /* Duna (Used for active states/highlights) */
+  --accent-foreground: #322e2b;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #fdfdfd;
+
+  --border: #cdcdcd; /* Cinza Neutro */
+  --input: #cdcdcd;
+  --ring: #927245;
+
+  --radius: 0.5rem;
+
+  /* Sidebar specific (Light) */
+  --sidebar: #fdfdfd;
+  --sidebar-foreground: #322e2b;
+  --sidebar-primary: #8E6F42; /* Ajustado junto com --primary */
+  --sidebar-primary-foreground: #fdfdfd;
+  --sidebar-accent: #ebebeb;
+  --sidebar-accent-foreground: #927245;
+  --sidebar-border: #cdcdcd;
+  --sidebar-ring: #927245;
+}
+
+.dark {
+  /* Group Studio Palette (Dark Mode) */
+  --background: #1f1f1f; /* Cinza Grafite */
+  --foreground: #fdfdfd; /* Branco Neve */
+
+  --card: #322e2b; /* Taupe Escuro */
+  --card-foreground: #fdfdfd;
+
+  --popover: #322e2b;
+  --popover-foreground: #fdfdfd;
+
+  --primary: #d5ae77; /* Duna (Brighter for dark mode) */
+  --primary-foreground: #322e2b;
+
+  --secondary: #322e2b;
+  --secondary-foreground: #fdfdfd;
+
+  --muted: #322e2b;
+  --muted-foreground: #cdcdcd; /* Cinza Neutro */
+
+  --accent: #927245; /* Bronze Nobre */
+  --accent-foreground: #fdfdfd;
+
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fdfdfd;
+
+  --border: #828384; /* Cinza Escuro */
+  --input: #828384;
+  --ring: #d5ae77;
+
+  /* Sidebar specific (Dark) */
+  --sidebar: #1f1f1f; /* Cinza Grafite */
+  --sidebar-foreground: #fdfdfd;
+  --sidebar-primary: #d5ae77;
+  --sidebar-primary-foreground: #322e2b;
+  --sidebar-accent: #322e2b; /* Taupe Escuro */
+  --sidebar-accent-foreground: #d5ae77;
+  --sidebar-border: #322e2b;
+  --sidebar-ring: #d5ae77;
+}
+
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Login page orb animations — substitui framer-motion no LoginGlow */
+@keyframes orb1-pulse {
+  0%, 100% { opacity: 0.4; transform: scale(0.88); }
+  50%       { opacity: 1;   transform: scale(1.1);  }
+}
+@keyframes orb2-pulse {
+  0%, 100% { opacity: 0.3;  transform: scale(1);    }
+  50%       { opacity: 0.85; transform: scale(1.18); }
+}
+@keyframes orb3-pulse {
+  0%, 100% { opacity: 0.2;  transform: scale(1);    }
+  50%       { opacity: 0.65; transform: scale(1.25); }
+}
+@keyframes orb4-pulse {
+  0%, 100% { opacity: 0.15; transform: scale(1);    }
+  50%       { opacity: 0.55; transform: scale(1.3);  }
+}
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+.animate-shimmer {
+  animation: shimmer 2s infinite linear;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--font-montserrat), sans-serif;
+    background-image:
+      radial-gradient(ellipse at 15% 80%, rgba(146, 114, 69, 0.07) 0%, transparent 55%),
+      radial-gradient(ellipse at 85% 15%, rgba(213, 174, 119, 0.05) 0%, transparent 50%);
+  }
+  .font-cinzel {
+    font-family: var(--font-cinzel), serif;
+  }
+  button,
+  [role="button"],
+  input[type="submit"],
+  input[type="reset"],
+  input[type="button"] {
+    @apply cursor-pointer;
+  }
+}
+
+@media print {
+  body {
+    display: none !important;
+  }
+}
