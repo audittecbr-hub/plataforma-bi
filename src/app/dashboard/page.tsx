@@ -181,7 +181,13 @@ export default async function DashboardPage() {
         ) : (
           <DepartmentView
               department={mainUserDepartment}
-              dashboards={dashboardConfig[mainUserDepartment] || []}
+              dashboards={(() => {
+                const base = dashboardConfig[mainUserDepartment] || []
+                const metas = (isLeader || isDiretoria) ? (dashboardConfig['Metas Líderes'] || []) : []
+                const seen = new Set(base.map(d => d.id))
+                const extras = metas.filter(d => !seen.has(d.id))
+                return [...base, ...extras]
+              })()}
               allowedSubDepartments={viewAllowedSubDepartments}
               isLeader={isLeader || isDiretoria}
           />
