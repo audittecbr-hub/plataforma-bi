@@ -35,6 +35,12 @@ yarn-error.log*
 debug_*.txt
 scripts/
 
+# supabase (migrations contain schema internals)
+/supabase
+
+# temp files
+temp_*
+
 # vercel
 .vercel
 

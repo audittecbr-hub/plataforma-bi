@@ -13,9 +13,10 @@ interface DepartmentViewProps {
   department: string
   dashboards: Dashboard[]
   allowedSubDepartments?: string[]
+  isLeader?: boolean
 }
 
-export function DepartmentView({ department, dashboards, allowedSubDepartments }: DepartmentViewProps) {
+export function DepartmentView({ department, dashboards, allowedSubDepartments, isLeader = false }: DepartmentViewProps) {
   // subTabs memoizado: recalcula apenas quando department ou allowedSubDepartments mudam
   const subTabs = useMemo(() => {
     // Para 'Metas Líderes', sub-tabs são as categorias únicas (sub_group ou department)
@@ -31,8 +32,8 @@ export function DepartmentView({ department, dashboards, allowedSubDepartments }
       ? allowedSubDepartments
       : defaultSubMenus
 
-    // Injeta a sub-tab 'Metas Líderes' dinamicamente se houver dashboards individuais (com assigned_user_id)
-    if (dashboards.some(d => !!d.assigned_user_id) && department !== 'GS' && department !== 'Metas Líderes') {
+    // Injeta a sub-tab 'Metas Líderes' dinamicamente apenas para líderes (ou diretoria/admin)
+    if (isLeader && dashboards.some(d => !!d.assigned_user_id) && department !== 'GS' && department !== 'Metas Líderes') {
         const base = resolved.length > 0 ? resolved : [department]
         return Array.from(new Set([...base, 'Metas Líderes']))
     }
@@ -49,6 +50,8 @@ export function DepartmentView({ department, dashboards, allowedSubDepartments }
       return dashboards.filter(d => (d.sub_group || d.department) === selectedSub)
     }
     return dashboards.filter(d =>
+      // Sub-tab 'Metas Líderes' mostra apenas dashboards individuais (com assigned_user_id)
+      (selectedSub === 'Metas Líderes' && !!d.assigned_user_id) ||
       d.department === selectedSub ||
       (d.allowed_departments && d.allowed_departments.includes(selectedSub))
     )

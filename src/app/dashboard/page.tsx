@@ -177,12 +177,13 @@ export default async function DashboardPage() {
 
       <div className="flex-1 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
         {isDiretoria ? (
-            <CompanyOverview dashboardConfig={dashboardConfig} />
+            <CompanyOverview dashboardConfig={dashboardConfig} isLeader={isLeader || isDiretoria} />
         ) : (
           <DepartmentView
               department={mainUserDepartment}
               dashboards={dashboardConfig[mainUserDepartment] || []}
               allowedSubDepartments={viewAllowedSubDepartments}
+              isLeader={isLeader || isDiretoria}
           />
         )}
       </div>

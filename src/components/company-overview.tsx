@@ -10,9 +10,10 @@ import { MAIN_DEPARTMENTS } from '@/lib/constants'
 interface CompanyOverviewProps {
   initialDepartment?: string
   dashboardConfig: Record<string, Dashboard[]>
+  isLeader?: boolean
 }
 
-export function CompanyOverview({ initialDepartment = 'Diretoria', dashboardConfig }: CompanyOverviewProps) {
+export function CompanyOverview({ initialDepartment = 'Diretoria', dashboardConfig, isLeader = false }: CompanyOverviewProps) {
   const [selectedDept, setSelectedDept] = useState(initialDepartment)
 
   // Estabiliza a referência do array de dashboards do departamento selecionado.
@@ -60,6 +61,7 @@ export function CompanyOverview({ initialDepartment = 'Diretoria', dashboardConf
       <DepartmentView
           department={selectedDept === 'Diretoria' ? 'GS' : selectedDept}
           dashboards={currentDashboards}
+          isLeader={isLeader}
       />
     </div>
   )
