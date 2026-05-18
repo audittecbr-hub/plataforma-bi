@@ -115,9 +115,9 @@ export default async function DashboardPage() {
               // Forçamos para a tab principal de Metas Líderes para a Diretoria/Admins
               relevantGroups.add('Metas Líderes');
 
-              // Para que os próprios usuários-alvo (que não são Diretoria) possam ver seus relatórios,
-              // precisamos garantir que também caiam no seu grupo original
-              if (!isDiretoria) {
+              // Apenas o dono do dashboard individual o ve no seu grupo original;
+              // lideres veem dashboards de subordinados somente em "Metas Lideres"
+              if (!isDiretoria && d.assigned_user_id === user.id) {
                   relevantGroups.add(DEPARTMENT_GROUPS[department] || department);
               }
           }
