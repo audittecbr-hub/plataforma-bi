@@ -4,6 +4,7 @@ export const MAIN_DEPARTMENTS = [
   'Comercial',
   'Operacional',
   'Metas Líderes',
+  'Regionais',
 ] as const
 
 export const DEPARTMENT_LABELS: Record<string, string> = {
@@ -12,6 +13,7 @@ export const DEPARTMENT_LABELS: Record<string, string> = {
   'Comercial': 'Comercial (expansão, franchising, educação)',
   'Operacional': 'Operacional (TAX, Corporate, tecnologia)',
   'Metas Líderes': 'Metas Líderes (Individuais)',
+  'Regionais': 'Regionais',
 }
 
 // Maps sub-departments to their main group
@@ -28,6 +30,11 @@ export const DEPARTMENT_GROUPS: Record<string, typeof MAIN_DEPARTMENTS[number]> 
   'Tecnologia': 'Operacional',
   'DHO': 'Metas Líderes',
   'Metas Líderes': 'Metas Líderes',
+  'Regionais': 'Regionais',
+  'Regional Sul': 'Regionais',
+  'Regional Sudeste': 'Regionais',
+  'Regional SP': 'Regionais',
+  'Regional Norte/Nordeste/Centro-Oeste': 'Regionais',
 }
 
 // Used for Admin User Dialog - specific sub-departments
@@ -40,7 +47,11 @@ export const SELECTABLE_DEPARTMENTS = [
   'Tax',
   'Corporate',
   'Tecnologia',
-  'DHO'
+  'DHO',
+  'Regional Sul',
+  'Regional Sudeste',
+  'Regional SP',
+  'Regional Norte/Nordeste/Centro-Oeste'
 ] as const
 
 // Original list for backward compatibility in Select options if needed, 
@@ -58,10 +69,16 @@ export const SUB_DEPARTMENTS = [
   'Tecnologia',
   'DHO',
   'Metas Líderes',
+  'Regionais',
+  'Regional Sul',
+  'Regional Sudeste',
+  'Regional SP',
+  'Regional Norte/Nordeste/Centro-Oeste',
 ]
 
 export const DEPARTMENT_SUB_MENUS: Record<string, string[]> = {
   'Comercial': ['Expansão', 'Franchising', 'Educação'],
   'Operacional': ['Tax', 'Corporate', 'Tecnologia'],
-  'Metas Líderes': ['Corporate', 'Expansão', 'Franchising', 'Tax', 'Tecnologia', 'DHO']
+  'Metas Líderes': ['Corporate', 'Expansão', 'Franchising', 'Tax', 'Tecnologia', 'DHO'],
+  'Regionais': ['Regional Sul', 'Regional Sudeste', 'Regional SP', 'Regional Norte/Nordeste/Centro-Oeste']
 }
