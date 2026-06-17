@@ -61,6 +61,7 @@ export default async function DashboardPage() {
 
   // Group dashboards by Department Group (for Tabs)
   const dashboardConfig: Record<string, Dashboard[]> = {}
+  const flatAccessibleDashboards: Dashboard[] = []
 
   if (sortedDashboards && sortedDashboards.length > 0) {
       sortedDashboards.forEach((d) => {
@@ -122,20 +123,23 @@ export default async function DashboardPage() {
               }
           }
 
+          const mappedDashboard = {
+             id: d.id,
+             name: d.name,
+             url: d.embed_url,
+             department: d.department,
+             allowed_departments: d.allowed_departments,
+             assigned_user_id: d.assigned_user_id,
+             sub_group: d.sub_group ?? null,
+          }
+          flatAccessibleDashboards.push(mappedDashboard)
+
           relevantGroups.forEach(group => {
                if (!dashboardConfig[group]) {
                    dashboardConfig[group] = []
                }
 
-               dashboardConfig[group].push({
-                 id: d.id,
-                 name: d.name,
-                 url: d.embed_url,
-                 department: d.department,
-                 allowed_departments: d.allowed_departments,
-                 assigned_user_id: d.assigned_user_id,
-                 sub_group: d.sub_group ?? null,
-               })
+               dashboardConfig[group].push(mappedDashboard)
           });
       })
   }
@@ -181,13 +185,7 @@ export default async function DashboardPage() {
         ) : (
           <DepartmentView
               department={mainUserDepartment}
-              dashboards={(() => {
-                const base = dashboardConfig[mainUserDepartment] || []
-                const metas = (isLeader || isDiretoria) ? (dashboardConfig['Metas Líderes'] || []) : []
-                const seen = new Set(base.map(d => d.id))
-                const extras = metas.filter(d => !seen.has(d.id))
-                return [...base, ...extras]
-              })()}
+              dashboards={flatAccessibleDashboards}
               allowedSubDepartments={viewAllowedSubDepartments}
               isLeader={isLeader || isDiretoria}
           />
