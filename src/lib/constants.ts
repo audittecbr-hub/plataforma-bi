@@ -31,6 +31,7 @@ export const DEPARTMENT_GROUPS: Record<string, typeof MAIN_DEPARTMENTS[number]> 
   'DHO': 'Metas Líderes',
   'Metas Líderes': 'Metas Líderes',
   'Regionais': 'Regionais',
+  'Regionais Centralizado': 'Regionais',
   'Regional Sul': 'Regionais',
   'Regional Sudeste': 'Regionais',
   'Regional SP': 'Regionais',
@@ -48,6 +49,7 @@ export const SELECTABLE_DEPARTMENTS = [
   'Corporate',
   'Tecnologia',
   'DHO',
+  'Regionais Centralizado',
   'Regional Sul',
   'Regional Sudeste',
   'Regional SP',
@@ -70,6 +72,7 @@ export const SUB_DEPARTMENTS = [
   'DHO',
   'Metas Líderes',
   'Regionais',
+  'Regionais Centralizado',
   'Regional Sul',
   'Regional Sudeste',
   'Regional SP',
@@ -80,5 +83,5 @@ export const DEPARTMENT_SUB_MENUS: Record<string, string[]> = {
   'Comercial': ['Expansão', 'Franchising', 'Educação'],
   'Operacional': ['Tax', 'Corporate', 'Tecnologia'],
   'Metas Líderes': ['Corporate', 'Expansão', 'Franchising', 'Tax', 'Tecnologia', 'DHO'],
-  'Regionais': ['Regional Sul', 'Regional Sudeste', 'Regional SP', 'Regional Norte/Nordeste/Centro-Oeste']
+  'Regionais': ['Regionais Centralizado', 'Regional Sul', 'Regional Sudeste', 'Regional SP', 'Regional Norte/Nordeste/Centro-Oeste']
 }
