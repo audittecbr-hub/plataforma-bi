@@ -144,6 +144,57 @@
   animation: shimmer 2s infinite linear;
 }
 
+/* Embed Power BI — container do relatório em tela cheia (controlada pelo portal) */
+.pbi-shell:fullscreen {
+  border-radius: 0;
+  background-color: var(--background);
+}
+
+/* Embed Power BI — fallback de tela cheia (iOS Safari não tem Fullscreen API em
+   elemento). Qualquer ancestral com transform/filter viraria bloco de contenção
+   do position:fixed e prenderia o overlay dentro do card — o dashboard envolve o
+   embed num motion.div do framer-motion. O :has() alcança exatamente os
+   ancestrais do embed, e só enquanto o fallback está ativo. */
+*:has(.pbi-shell-fs) {
+  transform: none !important;
+  filter: none !important;
+}
+
+/* Embed Power BI — scrollbar do palco, visível apenas com zoom acima de 100%.
+   É o único meio de pan: a roda do mouse é consumida pelo relatório. */
+.pbi-stage {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(146, 114, 69, 0.55) transparent;
+}
+.pbi-stage::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.pbi-stage::-webkit-scrollbar-track {
+  background: transparent;
+}
+.pbi-stage::-webkit-scrollbar-thumb {
+  background: rgba(146, 114, 69, 0.55);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 9999px;
+}
+.pbi-stage::-webkit-scrollbar-thumb:hover {
+  background: rgba(146, 114, 69, 0.85);
+  background-clip: content-box;
+}
+.dark .pbi-stage {
+  scrollbar-color: rgba(213, 174, 119, 0.5) transparent;
+}
+.dark .pbi-stage::-webkit-scrollbar-thumb {
+  background: rgba(213, 174, 119, 0.5);
+  background-clip: content-box;
+}
+.dark .pbi-stage::-webkit-scrollbar-thumb:hover {
+  background: rgba(213, 174, 119, 0.8);
+  background-clip: content-box;
+}
+
 .animate-fade-in-up {
   animation: fade-in-up 0.4s ease-out both;
 }
