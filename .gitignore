@@ -32,6 +32,15 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# Variantes sem o ponto inicial: ".env*" nao as cobre. A pasta de trabalho
+# costuma ter um "env.local" com SUPABASE_SERVICE_ROLE_KEY e
+# POWERBI_CLIENT_SECRET, que ficaria como untracked e poderia ser commitado.
+# Padroes propositalmente estreitos para nao engolir arquivos de codigo
+# legitimos como env.ts / env.mjs / env.d.ts.
+env.local
+env.local.*
+env.*.local
+*.env
 debug_*.txt
 scripts/
 
