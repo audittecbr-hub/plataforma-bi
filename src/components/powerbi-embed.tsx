@@ -19,12 +19,24 @@ import { cn } from '@/lib/utils'
 const NATIVE_CHROME_PX = 61
 
 /**
- * 100% = "ajustar à tela", o fit-to-page que o próprio player aplica; abaixo
- * disso só sobraria letterbox. Ampliar aumenta o viewport lógico do iframe,
- * então o Power BI refaz o fit e re-renderiza o relatório maior e nítido —
- * é o mesmo mecanismo do zoom nativo, não escala de bitmap.
+ * Escala de zoom do portal. 100% é o "ajustar à tela" — o fit-to-page que o
+ * próprio player aplica — e é o estado inicial (FIT_INDEX), não o piso.
+ *
+ * Ampliar aumenta o viewport lógico do iframe, então o Power BI refaz o fit e
+ * re-renderiza o relatório maior e nítido: é o mesmo mecanismo do zoom nativo,
+ * não escala de bitmap. Reduzir percorre a mesma via ao contrário — o iframe
+ * encolhe, o player refaz o fit e o relatório é redesenhado menor e igualmente
+ * nítido, centrado no palco com margem em volta.
+ *
+ * Como largura e altura escalam no mesmo fator, o aspect ratio não muda: abaixo
+ * de 100% o relatório não revela conteúdo novo (a 100% ele já está inteiro na
+ * tela), apenas passa a ocupar menos espaço. O piso é 60% porque abaixo disso o
+ * texto do relatório deixa de ser legível.
  */
-const ZOOM_STEPS = [100, 110, 125, 150, 175, 200, 250, 300]
+const ZOOM_STEPS = [60, 75, 90, 100, 110, 125, 150, 175, 200, 250, 300]
+
+/** Índice do "ajustar à tela": estado inicial e destino do botão de fit. */
+const FIT_INDEX = ZOOM_STEPS.indexOf(100)
 
 interface PowerBIEmbedProps {
   src: string
@@ -39,14 +51,14 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
   // zoomIndex: valor exibido na toolbar (resposta imediata ao clique).
   // appliedIndex: valor aplicado ao iframe, com debounce, para não disparar
   // um re-fit do relatório a cada clique numa sequência rápida.
-  const [zoomIndex, setZoomIndex] = useState(0)
-  const [appliedIndex, setAppliedIndex] = useState(0)
+  const [zoomIndex, setZoomIndex] = useState(FIT_INDEX)
+  const [appliedIndex, setAppliedIndex] = useState(FIT_INDEX)
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false)
   const [isFallbackFullscreen, setIsFallbackFullscreen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const zoomTargetRef = useRef(0)
+  const zoomTargetRef = useRef(FIT_INDEX)
 
   const isFullscreen = isNativeFullscreen || isFallbackFullscreen
   const zoom = ZOOM_STEPS[appliedIndex] / 100
@@ -105,9 +117,9 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
-    setZoomIndex(0)
-    setAppliedIndex(0)
-    zoomTargetRef.current = 0
+    setZoomIndex(FIT_INDEX)
+    setAppliedIndex(FIT_INDEX)
+    zoomTargetRef.current = FIT_INDEX
   }, [finalSrc])
 
   // O alvo vive num ref, não no state: cliques rápidos consecutivos precisam
@@ -192,6 +204,7 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
   const zoomPercent = ZOOM_STEPS[zoomIndex]
   const isMinZoom = zoomIndex === 0
   const isMaxZoom = zoomIndex === ZOOM_STEPS.length - 1
+  const isFitZoom = zoomIndex === FIT_INDEX
 
   return (
     <div
@@ -209,7 +222,12 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
         ref={stageRef}
         className={cn(
           "relative flex-1 min-h-0",
-          zoom > 1 ? "pbi-stage overflow-auto" : "overflow-hidden"
+          zoom > 1 ? "pbi-stage overflow-auto" : "overflow-hidden",
+          // Abaixo de 100% a camada é menor que o palco e encostaria no canto
+          // superior esquerdo. A centralização vale só aqui: com zoom acima de 1
+          // o palco é rolável, e centrar por flex deixaria a borda esquerda do
+          // canvas inalcançável pelo scroll.
+          zoom < 1 && "flex items-center justify-center"
         )}
       >
         {/* Camada de zoom: cresce com o percentual e recorta o chrome nativo do player.
@@ -290,8 +308,8 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
           variant="ghost"
           size="icon"
           className="h-7 w-7 text-muted-foreground hover:text-primary"
-          onClick={() => commitZoom(0)}
-          disabled={isMinZoom}
+          onClick={() => commitZoom(FIT_INDEX)}
+          disabled={isFitZoom}
           aria-label="Ajustar à página"
           title="Ajustar à página"
         >
