@@ -3,6 +3,22 @@
 import { createAdminClient } from "@/utils/supabase/admin"
 import { createClient } from "@/utils/supabase/server"
 import { revalidatePath, revalidateTag } from "next/cache"
+import { SELECTABLE_DEPARTMENTS } from "@/lib/constants"
+
+/**
+ * `profiles.department` e um enum no Postgres (`department_enum`), nao texto livre.
+ * Um valor fora dele derruba a escrita com `22P02 invalid input value for enum`.
+ *
+ * No cadastro isso acontecia *depois* de o usuario ja existir no auth, e nada era
+ * desfeito: sobrava um orfao invisivel na listagem (que le `profiles`) com o email
+ * ocupado no auth para sempre — toda nova tentativa batia em "ja cadastrado" e
+ * nunca chegava a criar o perfil. Validar antes de tocar no auth corta isso na
+ * raiz; o rollback em `createUser` cobre qualquer outra falha de perfil.
+ */
+function validarDepartamento(department: string): string | null {
+  if ((SELECTABLE_DEPARTMENTS as readonly string[]).includes(department)) return null
+  return `Departamento invalido: "${department || '(vazio)'}". Aceitos: ${SELECTABLE_DEPARTMENTS.join(', ')}.`
+}
 
 export type AdminUser = {
   id: string
@@ -148,6 +164,11 @@ export async function createUser(formData: FormData) {
       return { success: false, error: 'Campos obrigatórios ausentes' }
   }
 
+  const erroDepartamento = validarDepartamento(department)
+  if (erroDepartamento) {
+      return { success: false, error: erroDepartamento }
+  }
+
   try {
     // 1. Create Auth User
     const { data: { user }, error: createError } = await supabase.auth.admin.createUser({
@@ -177,7 +198,24 @@ export async function createUser(formData: FormData) {
 
     if (profileError) {
         console.error('Profile create error:', profileError)
-        return { success: false, error: 'Usuário criado, mas falha no perfil: ' + profileError.message }
+
+        // Sem perfil o usuário não serve para nada e ainda bloqueia o email no auth.
+        // Desfaz a criação para que o admin possa simplesmente tentar de novo.
+        const { error: rollbackError } = await supabase.auth.admin.deleteUser(user.id)
+
+        if (rollbackError) {
+            console.error('Rollback do auth falhou:', rollbackError)
+            return {
+                success: false,
+                error: `Falha ao criar o perfil (${profileError.message}) e não foi possível desfazer a criação de ${email} no auth. `
+                     + `Esse usuário está órfão: não aparece na listagem e o email fica bloqueado. Remova-o manualmente antes de tentar de novo.`
+            }
+        }
+
+        return {
+            success: false,
+            error: `Falha ao criar o perfil: ${profileError.message}. Nenhum usuário foi criado — pode tentar de novo.`
+        }
     }
 
     // 3. Generate secure password-setup link and send welcome email (never send raw password)
@@ -220,6 +258,11 @@ export async function updateUser(formData: FormData) {
     const is_leader = formData.get('isLeader') === 'on'
 
     if (!userId) return { success: false, error: 'ID do usuário ausente' }
+
+    const erroDepartamento = validarDepartamento(department)
+    if (erroDepartamento) {
+        return { success: false, error: erroDepartamento }
+    }
 
     try {
         // 1. Update Profile
