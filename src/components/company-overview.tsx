@@ -6,6 +6,7 @@ import { cn } from '@/lib/utils'
 import { DepartmentView } from '@/components/department-view'
 import { Dashboard } from '@/lib/types'
 import { MAIN_DEPARTMENTS } from '@/lib/constants'
+import { GROUP_META } from '@/lib/department-meta'
 
 interface CompanyOverviewProps {
   initialDepartment?: string
@@ -25,13 +26,20 @@ export function CompanyOverview({ initialDepartment = 'Diretoria', dashboardConf
   )
 
   return (
-    <div className="flex flex-col gap-4 h-full">
-      {/* Department Selector — Pills */}
-      <div className="w-full overflow-x-auto">
-        <div className="flex gap-2 pb-1 min-w-max" role="tablist" aria-label="Departamentos">
+    <div className="flex flex-col gap-4">
+      {/* Seletor de áreas — controle segmentado com indicador deslizante */}
+      <div className="scrollbar-none fade-x -mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0 sm:[mask-image:none]">
+        <div
+          className="inline-flex min-w-max gap-1 rounded-xl border bg-card p-1 shadow-xs"
+          role="tablist"
+          aria-label="Departamentos"
+        >
           {MAIN_DEPARTMENTS.map((dept) => {
+            const meta = GROUP_META[dept]
+            const Icon = meta.icon
             const label = dept === 'Diretoria' ? 'GS — Visão Geral' : dept
             const isActive = selectedDept === dept
+            const count = dashboardConfig[dept]?.length ?? 0
             return (
               <button
                 key={dept}
@@ -39,26 +47,44 @@ export function CompanyOverview({ initialDepartment = 'Diretoria', dashboardConf
                 aria-selected={isActive}
                 onClick={() => setSelectedDept(dept)}
                 className={cn(
-                  "relative px-4 py-1.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                  isActive ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                  "relative flex items-center gap-2 whitespace-nowrap rounded-[4px] px-3.5 py-2 text-[13.5px] font-semibold outline-none transition-colors duration-200",
+                  "focus-visible:ring-[3px] focus-visible:ring-ring/25",
+                  isActive ? "text-white dark:text-ink" : "text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
                 {isActive && (
-                  <motion.div
+                  <motion.span
                     layoutId="dept-pill-active"
-                    className="absolute inset-0 bg-primary rounded-full"
-                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                    aria-hidden
+                    className="absolute inset-0 rounded-[4px] bg-ink dark:bg-white"
+                    transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
                   />
                 )}
-                <span className="relative z-10">{label}</span>
+                <Icon
+                  className={cn(
+                    "relative size-4 transition-colors",
+                    isActive ? "text-[var(--gs-gold-light)] dark:text-[var(--gs-gold-dark)]" : ""
+                  )}
+                />
+                <span className="relative">{label}</span>
+                <span
+                  className={cn(
+                    "relative min-w-5 rounded-full px-1.5 text-center text-[11px] font-bold leading-5 tabular-nums transition-colors",
+                    isActive ? "bg-white/15 text-white dark:bg-ink/10 dark:text-ink" : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {count}
+                </span>
               </button>
             )
           })}
         </div>
       </div>
 
-      {/* Render the selected Department View */}
+      {/* A key remonta a view a cada área: sem ela, a sub-aba escolhida na área
+          anterior continuava selecionada e a nova área abria vazia. */}
       <DepartmentView
+          key={selectedDept}
           department={selectedDept === 'Diretoria' ? 'GS' : selectedDept}
           dashboards={currentDashboards}
           isLeader={isLeader}

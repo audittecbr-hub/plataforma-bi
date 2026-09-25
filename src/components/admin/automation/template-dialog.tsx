@@ -1,6 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { LoaderCircle, MessageSquareText, Pencil, Plus } from 'lucide-react'
+import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -14,7 +16,10 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import { Plus, Pencil } from 'lucide-react'
+import { IconBadge } from '@/components/ui/icon-badge'
+import { Hint } from '@/components/ui/tooltip'
+import { IconAction } from '@/components/admin/admin-ui'
+import { TEMPLATE_VARIABLES } from './template-variables'
 import { useRouter } from 'next/navigation'
 import { manageTemplate, type AutomationTemplate } from '@/app/actions/automation'
 
@@ -29,6 +34,7 @@ export function TemplateDialog({ templateToEdit, trigger }: TemplateDialogProps)
   const router = useRouter()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const contentRef = useRef<HTMLTextAreaElement>(null)
 
   async function handleSubmit(formData: FormData) {
     setIsLoading(true)
@@ -42,6 +48,7 @@ export function TemplateDialog({ templateToEdit, trigger }: TemplateDialogProps)
 
     if (result.success) {
       setOpen(false)
+      toast.success(isEditing ? 'Template atualizado' : 'Template criado')
       router.refresh()
     } else {
       setErrorMessage(result.error || 'Operação falhou')
@@ -49,70 +56,93 @@ export function TemplateDialog({ templateToEdit, trigger }: TemplateDialogProps)
     setIsLoading(false)
   }
 
+  /** Insere a variável onde está o cursor (o textarea continua não controlado). */
+  function insertVariable(token: string) {
+    const el = contentRef.current
+    if (!el) return
+    const start = el.selectionStart ?? el.value.length
+    const end = el.selectionEnd ?? el.value.length
+    el.setRangeText(token, start, end, 'end')
+    el.focus()
+  }
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ? trigger : (
           isEditing ? (
-             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <span className="sr-only">Editar</span>
-                <Pencil className="h-4 w-4" />
-            </Button>
+            <IconAction label="Editar template" icon={Pencil} />
           ) : (
-            <Button className="bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-primary-foreground">
-                <Plus className="mr-2 h-4 w-4" /> Novo Template
+            <Button>
+                <Plus /> Novo template
             </Button>
           )
         )}
       </DialogTrigger>
-      <DialogContent className="w-[95vw] max-w-[600px] bg-card text-foreground border-[#D5AE77]/20 rounded-lg">
-        <DialogHeader>
-          <DialogTitle className="text-[#D5AE77]">{isEditing ? 'Editar Template' : 'Novo Template'}</DialogTitle>
-          <DialogDescription className="text-muted-foreground">
-            Crie templates de mensagem para usar em suas automações.
-          </DialogDescription>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader className="flex-row items-start gap-4 space-y-0">
+          <IconBadge icon={MessageSquareText} />
+          <div className="space-y-1.5">
+            <DialogTitle>{isEditing ? 'Editar template' : 'Novo template'}</DialogTitle>
+            <DialogDescription>
+              Modelos de mensagem para usar nas automações.
+            </DialogDescription>
+          </div>
         </DialogHeader>
-        <form action={handleSubmit} className="grid gap-4 py-4">
+        <form action={handleSubmit} className="grid gap-5">
           <div className="grid gap-2">
-            <Label htmlFor="name" className="text-foreground">Nome do Template</Label>
-            <Input 
-                id="name" 
-                name="name" 
-                defaultValue={templateToEdit?.name || ''} 
-                placeholder="Ex: Bom dia Metas"
-                className="bg-background border-input text-foreground" 
-                required 
+            <Label htmlFor="name">Nome do template</Label>
+            <Input
+                id="name"
+                name="name"
+                defaultValue={templateToEdit?.name || ''}
+                placeholder="Ex.: Bom dia metas"
+                required
             />
           </div>
-          
+
           <div className="grid gap-2">
-            <Label htmlFor="content" className="text-foreground">Conteúdo da Mensagem</Label>
-            <Textarea 
-                id="content" 
-                name="content" 
-                defaultValue={templateToEdit?.content || ''} 
+            <Label htmlFor="content">Conteúdo da mensagem</Label>
+            <Textarea
+                ref={contentRef}
+                id="content"
+                name="content"
+                defaultValue={templateToEdit?.content || ''}
                 placeholder="Olá {nome}, seu relatório de {data} está pronto..."
-                className="bg-background border-input text-foreground font-mono text-sm min-h-[150px]" 
-                required 
+                className="min-h-[160px] font-mono text-[13px]"
+                required
             />
-            <div className="text-xs text-muted-foreground space-y-1 mt-2">
-                <p className="font-semibold text-foreground">Variáveis disponíveis:</p>
-                <ul className="list-disc pl-4 space-y-1">
-                    <li><code className="text-[#D5AE77]">{'{nome}'}</code>: Primeiro nome do destinatário (ex: João)</li>
-                    <li><code className="text-[#D5AE77]">{'{nome_completo}'}</code>: Nome completo do destinatário</li>
-                    <li><code className="text-[#D5AE77]">{'{saudacao}'}</code>: &quot;Bom dia&quot;, &quot;Boa tarde&quot; ou &quot;Boa noite&quot; (automático)</li>
-                    <li><code className="text-[#D5AE77]">{'{data}'}</code>: Data de referência do relatório ou dia atual</li>
-                    <li><code className="text-[#D5AE77]">{'{data_semanal}'}</code>: Período da semana anterior (ex: 15/01/2026 a 21/01/2026)</li>
-                    <li><code className="text-[#D5AE77]">{'{grupo}'}</code>: Nome do departamento ou grupo (ex: Diretoria)</li>
-                </ul>
+            <div className="space-y-2 pt-1">
+                <p className="eyebrow text-[10px] text-gold-text">Variáveis — clique para inserir</p>
+                <div className="flex flex-wrap gap-1.5">
+                    {TEMPLATE_VARIABLES.map((v) => (
+                        <Hint key={v.token} label={v.description}>
+                            <button
+                                type="button"
+                                onClick={() => insertVariable(v.token)}
+                                className="rounded-[3px] border border-transparent bg-gold-wash px-2 py-1 font-mono text-xs font-medium text-gold-text outline-none transition-colors hover:border-gold/40 focus-visible:ring-[3px] focus-visible:ring-ring/25"
+                            >
+                                {v.token}
+                            </button>
+                        </Hint>
+                    ))}
+                </div>
             </div>
           </div>
 
-          {errorMessage && <p className="text-sm text-red-500">{errorMessage}</p>}
-          
+          {errorMessage && (
+            <p role="alert" className="rounded-[4px] border border-danger/25 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {errorMessage}
+            </p>
+          )}
+
           <DialogFooter>
-            <Button type="submit" className="bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-black font-bold" disabled={isLoading}>
-                {isLoading ? 'Salvando...' : 'Salvar'}
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={isLoading}>
+                {isLoading && <LoaderCircle className="animate-spin" />}
+                {isLoading ? 'Salvando…' : 'Salvar'}
             </Button>
           </DialogFooter>
         </form>

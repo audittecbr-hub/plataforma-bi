@@ -10,30 +10,10 @@ import { TemplatesTab } from '@/components/admin/tabs/templates-tab'
 import { AccessLogsTab } from '@/components/admin/tabs/access-logs-tab'
 import { Suspense } from 'react'
 
-import { Skeleton } from '@/components/ui/skeleton'
+import { PageHeader } from '@/components/ui/page-header'
+import { AdminPanelSkeleton } from '@/components/admin/admin-skeleton'
 
-function LoadingSpinner() {
-    return (
-        <div className="flex flex-col gap-4 mt-4 animate-pulse">
-            <div className="flex items-center justify-between mb-2">
-                <Skeleton className="h-9 w-48 bg-[#D5AE77]/10" />
-                <Skeleton className="h-9 w-32 bg-[#D5AE77]/10" />
-            </div>
-            
-            <div className="rounded-md border border-[#D5AE77]/10 overflow-hidden">
-                <div className="h-10 bg-[#D5AE77]/5 w-full border-b border-[#D5AE77]/10" />
-                {[...Array(5)].map((_, i) => (
-                    <div key={i} className="h-16 w-full border-b border-[#D5AE77]/10 flex items-center px-4 gap-4">
-                        <Skeleton className="h-4 w-1/4 bg-[#D5AE77]/5" />
-                        <Skeleton className="h-4 w-1/4 bg-[#D5AE77]/5" />
-                        <Skeleton className="h-4 w-1/4 bg-[#D5AE77]/5" />
-                        <Skeleton className="h-4 w-1/6 bg-[#D5AE77]/5 ml-auto" />
-                    </div>
-                ))}
-            </div>
-        </div>
-    )
-}
+export const metadata = { title: 'Administração' }
 
 // Separate components for data fetching to allow streaming (if we moved this to loading.tsx/layout, but for now conditional rendering is enough)
 async function UsersContent({ page, search }: { page: number, search: string }) {
@@ -127,14 +107,16 @@ export default async function AdminPage({
   const search = typeof resolvedSearchParams.search === 'string' ? resolvedSearchParams.search : ''
 
   return (
-    <div className="flex flex-col gap-6 h-full">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Painel Administrativo</h1>
-      </div>
+    <div className="flex flex-col gap-6 lg:gap-8">
+      <PageHeader
+        eyebrow="Centro de controle"
+        title="Painel administrativo"
+        description="Gerencie contas, dashboards e automações do portal, e acompanhe a auditoria de acessos."
+      />
 
       <AdminTabsNav />
 
-      <Suspense fallback={<LoadingSpinner />}>
+      <Suspense fallback={<AdminPanelSkeleton />}>
         {tab === 'users' && <UsersContent page={page} search={search} />}
         {tab === 'dashboards' && <DashboardsContent page={page} search={search} />}
         {tab === 'automation' && <AutomationContent />}

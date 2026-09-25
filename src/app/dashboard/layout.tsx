@@ -1,7 +1,11 @@
-import { Sidebar } from "@/components/sidebar"
-import { createClient } from "@/utils/supabase/server"
 import { redirect } from "next/navigation"
-import { MobileNav } from "@/components/mobile-nav"
+import { createClient } from "@/utils/supabase/server"
+import { signOut } from "@/app/actions/auth"
+import { AppBackdrop } from "@/components/app-backdrop"
+import { CommandMenu } from "@/components/command-menu"
+import { Sidebar } from "@/components/sidebar"
+import { Topbar } from "@/components/topbar"
+import type { PortalUser } from "@/lib/user-display"
 
 export default async function DashboardLayout({
   children,
@@ -19,7 +23,7 @@ export default async function DashboardLayout({
   // Check if password change is required and get admin status
   const { data: profile } = await supabase
     .from('profiles')
-    .select('change_password_required, is_admin')
+    .select('change_password_required, is_admin, is_leader, full_name, department')
     .eq('id', user.id)
     .single()
 
@@ -27,24 +31,33 @@ export default async function DashboardLayout({
     redirect('/auth/reset-password')
   }
 
+  const portalUser: PortalUser = {
+    email: user.email,
+    fullName: profile?.full_name ?? null,
+    department: profile?.department ?? null,
+    isAdmin: profile?.is_admin || false,
+    isLeader: profile?.is_leader || false,
+  }
+
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background relative">
-      <aside className="hidden lg:flex h-full">
-         <Sidebar userEmail={user.email} isAdmin={profile?.is_admin || false} />
+    <div className="relative isolate flex h-dvh w-full overflow-hidden">
+      <AppBackdrop />
+
+      <aside className="relative z-30 hidden h-full shrink-0 lg:flex">
+        <Sidebar user={portalUser} />
       </aside>
-      <div className="flex flex-col w-full h-full">
-        {/* Mobile Header - Glassmorphism & Floating */}
-        <div className="lg:hidden fixed top-4 left-4 right-4 z-50 flex items-center justify-between px-4 py-2 bg-card/80 backdrop-blur-md border border-primary/20 rounded-2xl shadow-lg">
-            <span className="font-cinzel text-xl text-primary font-bold flex items-center h-10">
-                 <span className="text-foreground mr-1">GRUPO</span> STUDIO
-            </span>
-            <MobileNav isAdmin={profile?.is_admin || false} />
-        </div>
-        
-        <main className="flex flex-1 flex-col gap-4 p-4 pt-24 lg:gap-6 lg:p-6 overflow-auto">
-          {children}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <Topbar user={portalUser} signOutAction={signOut} />
+
+        <main id="conteudo" className="flex-1 overflow-y-auto overflow-x-hidden">
+          <div className="mx-auto flex min-h-full w-full max-w-[1760px] flex-col gap-6 px-4 py-6 sm:px-6 lg:gap-8 lg:px-8 lg:py-8 2xl:px-10">
+            {children}
+          </div>
         </main>
       </div>
+
+      <CommandMenu isAdmin={portalUser.isAdmin} signOutAction={signOut} />
     </div>
   )
 }

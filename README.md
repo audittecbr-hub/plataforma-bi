@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Portal BI — Grupo Studio
 
-## Getting Started
+Portal interno de inteligência do Grupo Studio: dashboards do Power BI por
+departamento, metas de líderes, automações de envio de relatórios e auditoria
+de acessos.
 
-First, run the development server:
+**Stack:** Next.js 16 (App Router) · React 19 · Tailwind CSS 4 · Radix UI ·
+Supabase (auth e dados) · Power BI "Publicar na Web".
+
+## Rodando localmente
 
 ```bash
+npm ci
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abra <http://localhost:3000>. Antes de subir, rode `npm run lint` e `npm run build`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Variáveis de ambiente
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Crie um `.env.local` (não versionado) com:
 
-## Learn More
+| Variável | Uso |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Cliente Supabase (sessão do usuário) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Operações administrativas no servidor e download da Codec Pro no build |
+| `POWERBI_TENANT`, `POWERBI_CLIENT_ID`, `POWERBI_CLIENT_SECRET`, `POWERBI_WORKSPACE_ID` | Status e refresh dos datasets do Power BI |
+| `NEXT_PUBLIC_SITE_URL` | Links de e-mail e logo nos templates de e-mail |
+| `NEXUS_WEBHOOK_SECRET`, `NEXT_PUBLIC_CORE_API_URL` | Integrações da automação |
+| `RESEND_API_KEY` | Envio de e-mails (hoje em modo simulado) |
 
-To learn more about Next.js, take a look at the following resources:
+## Design System
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+O visual segue o **Design System oficial do Grupo Studio** (pilares:
+profissionalismo, credibilidade e sofisticação).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- **Tokens** em `src/app/globals.css`: paleta travada de cinco tons (preto
+  `#1f1f1f`, dourado escuro `#927245`, dourado claro `#d5ae77`, cinza claro
+  `#ebebeb`, branco) mais as variações funcionais do DS; temas claro (branco /
+  cinza) e escuro (preto premium); raios de 4px (botões e campos) e 8px
+  (cards); sombras neutras; movimento com `cubic-bezier(0.22, 1, 0.36, 1)`,
+  sem mola. Sem gradientes e sem texturas além do grid hairline.
+- **Ilhas de tema:** a classe `dark` num container força o tema escuro só ali
+  (a sidebar é sempre preta); `light` força o claro (o formulário do login).
+- **Marca** em `public/brand`: logos oficiais V1 (horizontal, grafite e
+  branco), V2 (vertical, branco) e o selo GS recortado da V1. Use sempre o
+  componente `src/components/brand/logo.tsx` — o DS proíbe recompor o logo em
+  texto ou aplicar efeitos.
+- **Componentes base** em `src/components/ui` (botão, campos, diálogos,
+  tabelas, painel, cabeçalho de página, estados vazios, tooltips).
 
-## Deploy on Vercel
+### Fonte Codec Pro
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+A tipografia oficial é a **Codec Pro** (Zetafonts), que é comercial. Como este
+repositório é público, os arquivos da fonte **não são versionados**. Para
+ativá-la, coloque os `.ttf` licenciados em `public/fonts/codec-pro/` (veja o
+README da pasta) — o layout os detecta sozinho. Sem eles, o portal usa a
+**Hanken Grotesk**, o fallback oficial do DS, servida pelo `next/font`.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+No deploy, os arquivos vêm do bucket privado `brand-assets` do Supabase do
+portal (pasta `fonts/codec-pro/`): durante o `next build`, o `next.config.ts`
+baixa os que faltarem com as credenciais do Supabase que o deploy já tem e
+confere o SHA-256 de cada um. Na produção da Vercel, se a fonte não puder ser
+baixada, o build falha e a versão no ar continua a anterior. Para trocar a
+fonte, suba os novos arquivos no bucket e atualize os hashes no
+`next.config.ts`. Nunca faça commit dos `.ttf`.
+
+## Estrutura
+
+```
+src/
+  app/                  rotas (login, auth, dashboard, admin, settings)
+  components/
+    brand/              logos oficiais
+    ui/                 componentes base do design system
+    admin/              painel administrativo
+    auth/               moldura das telas de autenticação
+    settings/           seções de configurações
+  lib/                  constantes, navegação, Power BI, e-mail
+  utils/supabase/       clientes Supabase (browser, servidor, admin)
+```

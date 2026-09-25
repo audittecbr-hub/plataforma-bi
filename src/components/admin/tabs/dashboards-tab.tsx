@@ -2,12 +2,15 @@
 
 import { useState, useTransition, useEffect, useCallback, useRef } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { DepartmentChip } from '@/components/ui/department-chip'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Panel, PanelHeader, PanelToolbar } from '@/components/ui/panel'
+import { Skeleton } from '@/components/ui/skeleton'
+import { PaginationBar, SearchField, IconAction } from '@/components/admin/admin-ui'
 import { DashboardDialog } from '@/components/admin/dashboard-dialog'
 import { DeleteConfirmation } from '@/components/admin/delete-confirmation'
 import {
@@ -18,7 +21,7 @@ import {
     type PowerBIRefreshLog,
 } from '@/app/dashboard/admin/actions'
 import type { Dashboard } from '@/app/dashboard/admin/actions'
-import { RefreshCw, CheckCircle2, AlertCircle, Clock, History, Zap, Search, ChevronLeft, ChevronRight } from 'lucide-react'
+import { RefreshCw, CircleCheck, CircleAlert, Clock, History, LayoutDashboard, Zap, LoaderCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { ptBR } from 'date-fns/locale'
@@ -34,6 +37,7 @@ import {
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import type { RefreshHistoryItem } from '@/lib/powerbi'
+import { cn } from '@/lib/utils'
 
 interface DashboardsTabProps {
     dashboards?: Dashboard[]
@@ -44,25 +48,29 @@ interface DashboardsTabProps {
     search?: string
 }
 
-// Ícone e cor de acordo com o status retornado pela API do Power BI
+// Rótulo e tom de acordo com o status retornado pela API do Power BI
+const STATUS_MAP: Record<string, { label: string; variant: 'success' | 'danger' | 'warning' | 'outline' }> = {
+    Completed: { label: 'Concluído', variant: 'success' },
+    Failed: { label: 'Falhou', variant: 'danger' },
+    InProgress: { label: 'Em progresso', variant: 'warning' },
+    Unknown: { label: 'Atualizando', variant: 'warning' },
+    Disabled: { label: 'Desabilitado', variant: 'outline' },
+    Cancelled: { label: 'Cancelado', variant: 'warning' },
+}
+
 function RefreshStatusBadge({ status }: { status?: string }) {
-    if (!status) return <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-tight opacity-50">—</Badge>
-
-    const map: Record<string, { label: string; color: string }> = {
-        Completed: { label: 'Concluído', color: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' },
-        Failed: { label: 'Falhou', color: 'bg-rose-500/10 text-rose-400 border-rose-500/20' },
-        InProgress: { label: 'Em Progresso', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-        Unknown: { label: 'Atualizando', color: 'bg-amber-500/10 text-amber-400 border-amber-500/20' },
-        Disabled: { label: 'Desabilitado', color: 'bg-muted text-muted-foreground border-transparent' },
-        Cancelled: { label: 'Cancelado', color: 'bg-orange-500/10 text-orange-400 border-orange-500/20' },
-    }
-
-    const config = map[status] ?? { label: status, color: 'bg-muted text-muted-foreground' }
+    if (!status) return <Badge variant="outline">Sem registro</Badge>
+    const config = STATUS_MAP[status] ?? { label: status, variant: 'outline' as const }
+    const live = status === 'InProgress' || status === 'Unknown'
     return (
-        <span className={`inline-flex items-center rounded-[2px] border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${config.color}`}>
+        <Badge variant={config.variant} dot pulse={live}>
             {config.label}
-        </span>
+        </Badge>
     )
+}
+
+function formatWhen(value: string) {
+    return format(new Date(value), "dd/MM 'às' HH:mm", { locale: ptBR })
 }
 
 export function DashboardsTab({ dashboards, allUsers, error, totalPages = 1, currentPage = 1, search = '' }: DashboardsTabProps) {
@@ -164,272 +172,224 @@ export function DashboardsTab({ dashboards, allUsers, error, totalPages = 1, cur
         })
     }
 
+    const allSelected = !!dashboards?.length && selectedDashboards.length === dashboards.length
+    const logsTotalPages = Math.ceil(logs.length / LOGS_PER_PAGE)
+    const paginatedLogs = logs.slice((logsPage - 1) * LOGS_PER_PAGE, logsPage * LOGS_PER_PAGE)
+
     return (
-        <div className="space-y-6 mt-4">
-            <Card className="border-none bg-card">
-                <CardHeader className="flex flex-col gap-4">
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
-                        <div>
-                            <CardTitle className="text-xl md:text-2xl font-extrabold tracking-tight bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text">
-                                Gestão de Dashboards
-                            </CardTitle>
-                            <div className="text-sm text-muted-foreground flex items-center gap-2 mt-1.5 focus-within:opacity-100 transition-opacity">
-                                {totalPages > 0 ? (
-                                    <div className="flex items-center gap-2 px-2 py-0.5 rounded-[2px] border border-[#D5AE77]/20 bg-[#D5AE77]/5 backdrop-blur-sm">
-                                        <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted-foreground/50">Admin Center</span>
-                                        <div className="w-[1px] h-3 bg-[#D5AE77]/20" />
-                                        <span className="text-xs font-bold text-[#D5AE77]">
-                                            Página {currentPage} <span className="text-muted-foreground/60 font-medium mx-0.5 lowercase">de</span> {totalPages}
-                                        </span>
-                                    </div>
-                                ) : (
-                                    <span className="text-[10px] text-rose-400 font-bold uppercase tracking-widest px-2 py-0.5 border border-rose-500/20 bg-rose-500/5 rounded-[2px]">Nenhum dashboard encontrado</span>
-                                )}
-                            </div>
-                        </div>
-                        <div className="flex items-center gap-2 w-full sm:w-auto">
-                        {selectedDashboards.length > 0 && (
-                            <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="border-[#D5AE77] text-[#D5AE77] hover:bg-[#D5AE77]/10"
-                                        disabled={isRefreshing}
-                                    >
-                                        <RefreshCw className={`mr-2 h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                                        Atualizar ({selectedDashboards.length})
-                                    </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Confirmar Atualização</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            Deseja realmente solicitar a atualização para {selectedDashboards.length} dashboard(s) selecionado(s)?
-                                            Isso disparará o processo de refresh no Power BI.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                                        <AlertDialogAction
-                                            onClick={handleRefresh}
-                                            className="bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-white transition-all active:scale-95"
-                                        >
-                                            Cristhofer, atualiza o BI, por favor
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
-                        )}
+        <div className="space-y-6">
+            <Panel>
+                <PanelHeader
+                    icon={LayoutDashboard}
+                    eyebrow="Conteúdo"
+                    title="Gestão de dashboards"
+                    description="Relatórios do Power BI publicados no portal, visibilidade por área e atualização de dados."
+                    actions={
+                        <>
+                            {selectedDashboards.length > 0 && (
+                                <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                        <Button variant="outline" disabled={isRefreshing}>
+                                            <RefreshCw className={cn(isRefreshing && 'animate-spin')} />
+                                            Atualizar ({selectedDashboards.length})
+                                        </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                            <AlertDialogTitle>Confirmar atualização</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                                Deseja realmente solicitar a atualização para {selectedDashboards.length} dashboard(s) selecionado(s)?
+                                                Isso disparará o processo de refresh no Power BI.
+                                            </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                                            <AlertDialogAction onClick={handleRefresh}>
+                                                Cristhofer, atualiza o BI, por favor
+                                            </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                </AlertDialog>
+                            )}
                             <DashboardDialog allUsers={allUsers} />
-                        </div>
-                    </div>
+                        </>
+                    }
+                />
 
-                    {/* Barra de busca */}
-                    <div className="relative group/search">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground group-focus-within/search:text-[#D5AE77] transition-colors pointer-events-none" />
-                        <Input
-                            placeholder="Buscar por nome ou departamento..."
-                            value={searchValue}
-                            onChange={(e) => handleSearchChange(e.target.value)}
-                            className="pl-9 h-11 bg-background/50 border-[#D5AE77]/10 focus-visible:border-[#D5AE77]/40 focus-visible:ring-[#D5AE77]/10 rounded-[2px] transition-all"
-                        />
-                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-focus-within/search:opacity-100 transition-opacity">
-                             <kbd className="pointer-events-none h-5 select-none items-center gap-1 rounded bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground flex">
-                                <span className="text-xs">esc</span>
-                            </kbd>
-                        </div>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    {error ? (
-                        <p className="text-red-500">Erro ao carregar dashboards: {error}</p>
-                    ) : (
-                        <div className="space-y-4">
-                            {/* Mobile */}
-                            <div className="grid grid-cols-1 gap-4 md:hidden">
-                                {dashboards?.map((d) => (
-                                    <div key={`mobile-${d.id}`} className="flex flex-col space-y-3 rounded-lg border bg-card p-4 shadow-sm relative">
-                                        <div className="absolute top-4 right-4">
-                                            <Checkbox
-                                                checked={selectedDashboards.includes(d.name)}
-                                                onCheckedChange={() => toggleDashboard(d.name)}
-                                            />
-                                        </div>
-                                        <div className="flex items-center justify-between pr-8">
-                                            <div className="font-medium mr-2">{d.name}</div>
-                                            <Badge variant="outline" className="whitespace-nowrap">{d.department}</Badge>
-                                        </div>
-                                        <div className="text-sm text-muted-foreground truncate max-w-full">
-                                            URL: {d.embed_url}
-                                        </div>
-                                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#D5AE77]/10">
-                                            <DashboardDialog dashboardToEdit={d} allUsers={allUsers} />
-                                            <DeleteConfirmation id={d.id} itemType="Dashboard" deleteAction={deleteDashboard} />
-                                        </div>
+                <PanelToolbar className="justify-between">
+                    <SearchField
+                        id="busca-dashboards"
+                        value={searchValue}
+                        onChange={handleSearchChange}
+                        placeholder="Buscar por nome ou departamento…"
+                    />
+                    {selectedDashboards.length > 0 && (
+                        <p className="text-[13px] text-muted-foreground">
+                            <span className="font-semibold text-foreground">{selectedDashboards.length}</span> selecionado(s) para atualizar
+                        </p>
+                    )}
+                </PanelToolbar>
+
+                {error ? (
+                    <EmptyState compact icon={CircleAlert} title="Não foi possível carregar os dashboards" description={error} />
+                ) : !dashboards?.length ? (
+                    <EmptyState
+                        compact
+                        icon={LayoutDashboard}
+                        title="Nenhum dashboard encontrado"
+                        description={searchValue ? `Nada corresponde a “${searchValue}”.` : 'Adicione o primeiro relatório do portal.'}
+                    />
+                ) : (
+                    <>
+                        {/* Mobile */}
+                        <ul className="divide-y border-t md:hidden">
+                            {dashboards.map((d) => (
+                                <li key={`mobile-${d.id}`} className="flex items-start gap-3 px-5 py-4">
+                                    <Checkbox
+                                        className="mt-0.5"
+                                        checked={selectedDashboards.includes(d.name)}
+                                        onCheckedChange={() => toggleDashboard(d.name)}
+                                        aria-label={`Selecionar ${d.name}`}
+                                    />
+                                    <div className="min-w-0 flex-1 space-y-1.5">
+                                        <p className="truncate text-sm font-semibold text-foreground">{d.name}</p>
+                                        <DepartmentChip department={d.department} />
+                                        <p className="truncate font-mono text-[11.5px] text-faint">{d.embed_url}</p>
                                     </div>
-                                ))}
-                            </div>
+                                    <div className="flex shrink-0 items-center gap-0.5">
+                                        <DashboardDialog dashboardToEdit={d} allUsers={allUsers} />
+                                        <DeleteConfirmation id={d.id} itemType="Dashboard" itemName={d.name} deleteAction={deleteDashboard} />
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
 
-                            {/* Desktop */}
-                            <div className="hidden md:block overflow-x-auto">
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead className="w-[40px]">
-                                                <Checkbox
-                                                    checked={selectedDashboards.length === dashboards?.length && dashboards?.length > 0}
-                                                    onCheckedChange={toggleAll}
-                                                />
-                                            </TableHead>
-                                            <TableHead>Nome</TableHead>
-                                            <TableHead>Departamento</TableHead>
-                                            <TableHead>URL</TableHead>
-                                            <TableHead className="text-right">Ações</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {dashboards?.map((d) => (
-                                            <TableRow key={d.id} className="group/row transition-all duration-300 hover:bg-[#D5AE77]/5 border-l-2 border-l-transparent hover:border-l-[#D5AE77]/40">
+                        {/* Desktop */}
+                        <div className="hidden border-t md:block">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead className="w-[52px]">
+                                            <Checkbox checked={allSelected} onCheckedChange={toggleAll} aria-label="Selecionar todos" />
+                                        </TableHead>
+                                        <TableHead>Dashboard</TableHead>
+                                        <TableHead>Departamento</TableHead>
+                                        <TableHead>Tipo</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {dashboards.map((d) => {
+                                        const selected = selectedDashboards.includes(d.name)
+                                        const extras = d.allowed_departments?.length ?? 0
+                                        const individual = !!d.assigned_user_id || !!d.sub_group
+                                        return (
+                                            <TableRow key={d.id} data-state={selected ? 'selected' : undefined}>
                                                 <TableCell>
                                                     <Checkbox
-                                                        checked={selectedDashboards.includes(d.name)}
+                                                        checked={selected}
                                                         onCheckedChange={() => toggleDashboard(d.name)}
-                                                        className="data-[state=checked]:bg-[#D5AE77] data-[state=checked]:border-[#D5AE77]"
+                                                        aria-label={`Selecionar ${d.name}`}
                                                     />
                                                 </TableCell>
-                                                <TableCell className="font-bold whitespace-nowrap text-foreground group-hover/row:text-[#D5AE77] transition-colors">
-                                                    {d.name}
+                                                <TableCell className="max-w-[420px]">
+                                                    <p className="truncate font-semibold text-foreground">{d.name}</p>
+                                                    <p className="truncate font-mono text-[11.5px] text-faint" title={d.embed_url}>{d.embed_url}</p>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Badge variant="outline" className="rounded-[2px] text-[10px] uppercase font-bold tracking-wider border-[#D5AE77]/20 text-[#D5AE77]/80 bg-[#D5AE77]/5 group-hover/row:border-[#D5AE77]/40">
-                                                        {d.department}
-                                                    </Badge>
+                                                    <div className="flex items-center gap-2.5">
+                                                        <DepartmentChip department={d.department} />
+                                                        {extras > 0 && (
+                                                            <span className="text-xs text-muted-foreground" title={d.allowed_departments?.join(', ')}>
+                                                                +{extras}
+                                                            </span>
+                                                        )}
+                                                    </div>
                                                 </TableCell>
-                                                <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground/40 group-hover/row:text-muted-foreground/80 font-mono transition-opacity">
-                                                    {d.embed_url}
+                                                <TableCell>
+                                                    {individual ? <Badge variant="gold">Metas líderes</Badge> : <Badge variant="outline">Departamento</Badge>}
                                                 </TableCell>
-                                                <TableCell className="text-right flex items-center justify-end gap-2">
-                                                    <DashboardDialog dashboardToEdit={d} allUsers={allUsers} />
-                                                    <DeleteConfirmation id={d.id} itemType="Dashboard" deleteAction={deleteDashboard} />
+                                                <TableCell className="text-right">
+                                                    <div className="flex items-center justify-end gap-0.5">
+                                                        <DashboardDialog dashboardToEdit={d} allUsers={allUsers} />
+                                                        <DeleteConfirmation id={d.id} itemType="Dashboard" itemName={d.name} deleteAction={deleteDashboard} />
+                                                    </div>
                                                 </TableCell>
                                             </TableRow>
-                                        ))}
-                                    </TableBody>
-                                </Table>
+                                        )
+                                    })}
+                                </TableBody>
+                            </Table>
                         </div>
-                        </div>
-                    )}
+                    </>
+                )}
 
-                    {/* Controles de paginação da tabela de dashboards */}
-                    {totalPages > 1 && (
-                        <div className="flex items-center justify-between pt-6 mt-6 border-t border-[#D5AE77]/10">
-                            <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted-foreground/40">
-                                {currentPage} <span className="opacity-30">/</span> {totalPages}
+                {/* Controles de paginação da tabela de dashboards */}
+                <PaginationBar
+                    page={currentPage}
+                    totalPages={totalPages}
+                    onPrev={() => navigate(currentPage - 1)}
+                    onNext={() => navigate(currentPage + 1)}
+                />
+            </Panel>
+
+            <div className="grid gap-6 xl:grid-cols-5">
+                {/* Status ao vivo dos datasets */}
+                <Panel className="xl:col-span-3">
+                    <PanelHeader
+                        icon={Zap}
+                        eyebrow="Power BI"
+                        title="Status das atualizações"
+                        description="Último refresh de cada dataset, direto da API do Power BI."
+                        actions={<IconAction label="Consultar novamente" icon={RefreshCw} onClick={fetchStatus} disabled={isLoadingStatus} className={cn(isLoadingStatus && '[&_svg]:animate-spin')} />}
+                    />
+                    <div className="border-t p-5 md:p-6">
+                        {isLoadingStatus ? (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                {Array.from({ length: 6 }).map((_, i) => (
+                                    <Skeleton key={i} className="h-[74px] rounded-xl" />
+                                ))}
                             </div>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => navigate(currentPage - 1)}
-                                    disabled={currentPage <= 1}
-                                    className="h-8 w-8 rounded-[2px] border-[#D5AE77]/10 hover:border-[#D5AE77]/40 hover:bg-[#D5AE77]/5 transition-all"
-                                >
-                                    <ChevronLeft className="h-4 w-4 text-[#D5AE77]" />
-                                </Button>
-                                <Button
-                                    variant="outline"
-                                    size="icon"
-                                    onClick={() => navigate(currentPage + 1)}
-                                    disabled={currentPage >= totalPages}
-                                    className="h-8 w-8 rounded-[2px] border-[#D5AE77]/10 hover:border-[#D5AE77]/40 hover:bg-[#D5AE77]/5 transition-all"
-                                >
-                                    <ChevronRight className="h-4 w-4 text-[#D5AE77]" />
-                                </Button>
-                            </div>
-                        </div>
-                    )}
-                </CardContent>
-
-            </Card>
-
-            {/* Status ao Vivo dos Datasets */}
-            <Card className="border-none bg-card shadow-sm overflow-hidden rounded-[2px]">
-                <CardHeader className="flex flex-row items-center justify-between border-b border-[#D5AE77]/5 bg-[#D5AE77]/5">
-                    <div>
-                        <CardTitle className="text-base font-bold flex items-center gap-2 uppercase tracking-wide">
-                            <Zap className="h-4 w-4 text-[#D5AE77]" />
-                            Status das Atualizações
-                        </CardTitle>
-                        <CardDescription className="text-[11px] opacity-70">Último refresh de cada dataset no Power BI</CardDescription>
-                    </div>
-                    <Button variant="ghost" size="sm" onClick={fetchStatus} disabled={isLoadingStatus}>
-                        <RefreshCw className={`h-4 w-4 ${isLoadingStatus ? 'animate-spin' : ''}`} />
-                    </Button>
-                </CardHeader>
-                <CardContent className="pt-4 px-6 pb-2">
-                    {isLoadingStatus ? (
-                        <div className="flex items-center gap-2 text-[#D5AE77] text-xs py-10 justify-center font-bold tracking-widest uppercase animate-pulse">
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                            Sincronizando Power BI...
-                        </div>
-                    ) : (
-                        <div className="space-y-1">
-                            {Object.keys(refreshStatus).length === 0 ? (
-                                <p className="text-xs text-muted-foreground py-8 text-center italic">
-                                    Nenhum status disponível. Clique em atualizar para verificar.
-                                </p>
-                            ) : (
-                                Object.entries(refreshStatus).map(([name, item]) => (
-                                    <div key={name} className="flex items-center justify-between py-3 group/status">
-                                        <span className="text-sm font-bold text-foreground group-hover/status:text-[#D5AE77] transition-colors">{name}</span>
-                                        <div className="flex items-center gap-4">
-                                            {item?.endTime && (
-                                                <span className="text-[10px] text-muted-foreground font-medium flex items-center gap-1.5 tabular-nums">
-                                                    <Clock className="h-3 w-3 opacity-40" />
-                                                    {format(new Date(item.endTime), "dd/MM 'às' HH:mm", { locale: ptBR })}
-                                                </span>
-                                            )}
+                        ) : Object.keys(refreshStatus).length === 0 ? (
+                            <EmptyState compact icon={Zap} title="Nenhum status disponível" description="Clique em consultar para verificar os datasets." />
+                        ) : (
+                            <ul className="grid gap-3 sm:grid-cols-2">
+                                {Object.entries(refreshStatus).map(([name, item]) => (
+                                    <li key={name} className="flex flex-col gap-2.5 rounded-xl border bg-surface p-4">
+                                        <div className="flex items-start justify-between gap-3">
+                                            <p className="text-sm font-semibold leading-snug text-foreground">{name}</p>
                                             <RefreshStatusBadge status={item?.status} />
                                         </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-                    )}
-                </CardContent>
-            </Card>
-
-            {/* Histórico de Atualizações */}
-            <Card className="border-none bg-card">
-                <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                        <CardTitle className="text-lg flex items-center gap-2">
-                            <History className="h-5 w-5 text-[#D5AE77]" />
-                            Histórico de Atualizações
-                        </CardTitle>
-                        <CardDescription>Registros de sucesso e falha das solicitações de refresh</CardDescription>
+                                        <p className="flex items-center gap-1.5 text-xs text-muted-foreground tabular-nums">
+                                            <Clock className="size-3.5 text-faint" />
+                                            {item?.endTime ? formatWhen(item.endTime) : item?.startTime ? `Iniciado ${formatWhen(item.startTime)}` : 'Sem registro recente'}
+                                        </p>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
                     </div>
-                    <Button variant="ghost" size="sm" onClick={fetchLogs} disabled={isLoadingLogs}>
-                        <RefreshCw className={`h-4 w-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
-                    </Button>
-                </CardHeader>
-                <CardContent>
-                    {isLoadingLogs ? (
-                        <div className="flex items-center gap-2 text-muted-foreground text-sm py-4">
-                            <RefreshCw className="h-4 w-4 animate-spin" />
-                            Carregando logs...
-                        </div>
-                    ) : logs.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-8 text-muted-foreground">
-                            <CheckCircle2 className="h-12 w-12 text-green-500/20 mb-2" />
-                            <p>Nenhum registro de atualização encontrado.</p>
-                        </div>
-                    ) : (() => {
-                        const totalPages = Math.ceil(logs.length / LOGS_PER_PAGE)
-                        const paginatedLogs = logs.slice((logsPage - 1) * LOGS_PER_PAGE, logsPage * LOGS_PER_PAGE)
-                        return (
-                            <div className="space-y-3">
+                </Panel>
+
+                {/* Histórico de atualizações */}
+                <Panel className="xl:col-span-2">
+                    <PanelHeader
+                        icon={History}
+                        eyebrow="Auditoria"
+                        title="Histórico"
+                        description="Solicitações de refresh e falhas."
+                        actions={<IconAction label="Recarregar histórico" icon={RefreshCw} onClick={fetchLogs} disabled={isLoadingLogs} className={cn(isLoadingLogs && '[&_svg]:animate-spin')} />}
+                    />
+                    <div className="border-t px-5 py-5 md:px-6">
+                        {isLoadingLogs ? (
+                            <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                                <LoaderCircle className="size-4 animate-spin text-gold" />
+                                Carregando histórico…
+                            </div>
+                        ) : logs.length === 0 ? (
+                            <EmptyState compact icon={CircleCheck} title="Nenhum registro ainda" description="As solicitações de atualização aparecem aqui." />
+                        ) : (
+                            <ol className="relative space-y-5 before:absolute before:bottom-2 before:left-[11px] before:top-2 before:w-px before:bg-border">
                                 {paginatedLogs.map((log) => {
                                     const isError = log.event_type === 'job_error'
                                     const details = typeof log.details === 'object' && log.details !== null ? log.details as Record<string, unknown> : {}
@@ -437,67 +397,43 @@ export function DashboardsTab({ dashboards, allUsers, error, totalPages = 1, cur
                                     const errorMsg = details.error as string | undefined
 
                                     return (
-                                        <div
-                                            key={log.id}
-                                            className={`flex items-start gap-3 p-3 rounded-lg border ${isError
-                                                ? 'border-red-500/10 bg-red-500/5'
-                                                : 'border-green-500/10 bg-green-500/5'
-                                                }`}
-                                        >
-                                            {isError ? (
-                                                <AlertCircle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
-                                            ) : (
-                                                <CheckCircle2 className="h-5 w-5 text-green-500 mt-0.5 flex-shrink-0" />
-                                            )}
-                                            <div className="flex-1 space-y-1 min-w-0">
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <span className="font-medium text-sm truncate">
-                                                        {isError ? 'Falha' : 'Solicitado'}{dashboardName ? ` — ${dashboardName}` : ''}
-                                                    </span>
-                                                    <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-                                                        <Clock className="h-3 w-3" />
-                                                        {format(new Date(log.created_at), "dd/MM 'às' HH:mm", { locale: ptBR })}
-                                                    </span>
+                                        <li key={log.id} className="relative flex gap-3.5">
+                                            <span
+                                                className={cn(
+                                                    "relative z-10 mt-0.5 grid size-6 shrink-0 place-items-center rounded-full border bg-card",
+                                                    isError ? "border-danger/40 text-danger" : "border-gold/50 text-gold"
+                                                )}
+                                            >
+                                                {isError ? <CircleAlert className="size-3.5" /> : <CircleCheck className="size-3.5" />}
+                                            </span>
+                                            <div className="min-w-0 flex-1 space-y-1">
+                                                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                                    <p className="text-sm font-semibold text-foreground">
+                                                        {isError ? 'Falha' : 'Solicitado'}
+                                                        {dashboardName && <span className="font-normal text-muted-foreground"> · {dashboardName}</span>}
+                                                    </p>
+                                                    <span className="text-xs text-faint tabular-nums">{formatWhen(log.created_at)}</span>
                                                 </div>
                                                 {errorMsg && (
-                                                    <p className="text-xs text-muted-foreground leading-relaxed break-all">{errorMsg}</p>
+                                                    <p className="break-words rounded-[4px] bg-danger/[0.06] px-2.5 py-1.5 font-mono text-[11.5px] leading-relaxed text-danger">
+                                                        {errorMsg}
+                                                    </p>
                                                 )}
                                             </div>
-                                        </div>
+                                        </li>
                                     )
                                 })}
-
-                                {/* Controles de paginação */}
-                                {totalPages > 1 && (
-                                    <div className="flex items-center justify-between pt-3 border-t border-border/40">
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setLogsPage(p => Math.max(1, p - 1))}
-                                            disabled={logsPage === 1}
-                                            className="text-xs"
-                                        >
-                                            ← Anterior
-                                        </Button>
-                                        <span className="text-xs text-muted-foreground">
-                                            Página {logsPage} de {totalPages}
-                                        </span>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => setLogsPage(p => Math.min(totalPages, p + 1))}
-                                            disabled={logsPage === totalPages}
-                                            className="text-xs"
-                                        >
-                                            Próxima →
-                                        </Button>
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    })()}
-                </CardContent>
-            </Card>
+                            </ol>
+                        )}
+                    </div>
+                    <PaginationBar
+                        page={logsPage}
+                        totalPages={logsTotalPages}
+                        onPrev={() => setLogsPage(p => Math.max(1, p - 1))}
+                        onNext={() => setLogsPage(p => Math.min(logsTotalPages, p + 1))}
+                    />
+                </Panel>
+            </div>
         </div>
     )
 }

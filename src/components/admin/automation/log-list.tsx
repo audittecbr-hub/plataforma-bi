@@ -12,10 +12,10 @@ interface LogListProps {
 }
 
 function getIcon(type: string) {
-    if (type.includes('error')) return <XCircle className="h-4 w-4 text-red-500" />
-    if (type.includes('success') || type.includes('sent')) return <CheckCircle className="h-4 w-4 text-green-500" />
-    if (type.includes('start')) return <Activity className="h-4 w-4 text-blue-500" />
-    return <Info className="h-4 w-4 text-gray-500" />
+    if (type.includes('error')) return <XCircle className="h-4 w-4 text-danger" />
+    if (type.includes('success') || type.includes('sent')) return <CheckCircle className="h-4 w-4 text-success" />
+    if (type.includes('start')) return <Activity className="h-4 w-4 text-info" />
+    return <Info className="h-4 w-4 text-muted-foreground" />
 }
 
 function formatDate(dateStr: string) {
@@ -24,21 +24,21 @@ function formatDate(dateStr: string) {
 
 export function LogList({ logs, error }: LogListProps) {
     return (
-        <Card className="border-none bg-card/50 mt-4">
+        <Card>
             <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                    <Activity className="h-5 w-5 text-[#D5AE77]" />
+                    <Activity className="h-5 w-5 text-gold" />
                     Histórico de Execução
                 </CardTitle>
             </CardHeader>
             <CardContent>
                 {error ? (
-                    <p className="text-red-500">Erro: {error}</p>
+                    <p className="text-danger">Erro: {error}</p>
                 ) : (
-                    <div className="rounded-md border border-[#D5AE77]/20">
+                    <div className="overflow-hidden rounded-xl border">
                         <Table>
                             <TableHeader>
-                                <TableRow className="hover:bg-muted/50 border-[#D5AE77]/20">
+                                <TableRow>
                                     <TableHead className="w-[180px]">Data/Hora</TableHead>
                                     <TableHead className="w-[150px]">Tipo</TableHead>
                                     <TableHead>Detalhes</TableHead>
@@ -46,7 +46,7 @@ export function LogList({ logs, error }: LogListProps) {
                             </TableHeader>
                             <TableBody>
                                 {logs?.map((log) => (
-                                    <TableRow key={log.id} className="hover:bg-muted/50 border-[#D5AE77]/10">
+                                    <TableRow key={log.id}>
                                         <TableCell className="text-muted-foreground text-sm font-mono">
                                             {formatDate(log.created_at)}
                                         </TableCell>

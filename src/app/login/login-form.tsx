@@ -2,31 +2,25 @@
 
 import { useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
+import { ArrowRight, CircleAlert, LoaderCircle, Mail } from 'lucide-react'
 import { login } from './actions'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2 } from 'lucide-react'
 import { Checkbox } from '@/components/ui/checkbox'
-// We assume toast is available, if not we will use simple alert for now or implement toast later.
-// The user asked for toasts. I'll stick to basic feedback in UI for now and ensure toast is added later or use a library if present.
-// Checking package.json I see "sonner" or similar isn't strictly listed but often Shadcn uses it.
-// I'll assume standard Shadcn Toast if available, otherwise just text feedback.
-// Actually, I'll use simple text feedback inside the modal for now to ensure functionality.
-// Wait, user asked for "Toasts". I will check if `components/ui/use-toast.ts` exists in next step or just implement inline first.
+import { PasswordInput } from '@/components/ui/password-input'
 
 function SubmitButton() {
   const { pending } = useFormStatus()
 
   return (
-    <Button type="submit" className="w-full bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-primary-foreground font-semibold" disabled={pending}>
-      {pending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-      Entrar
+    <Button type="submit" size="lg" className="group w-full" disabled={pending}>
+      {pending ? <LoaderCircle className="animate-spin" /> : null}
+      {pending ? 'Entrando…' : 'Entrar no portal'}
+      {!pending && <ArrowRight className="transition-transform duration-200 ease-out-brand group-hover:translate-x-[3px]" />}
     </Button>
   )
 }
-
 
 export function LoginForm({ next }: { next?: string }) {
   // Bind the next param to the server action
@@ -34,38 +28,60 @@ export function LoginForm({ next }: { next?: string }) {
   const [state, formAction] = useActionState(loginWithRedirect, null)
 
   return (
-    <Card className="w-[350px] border-none bg-card text-card-foreground shadow-2xl bg-[#322E2B]">
-      <CardHeader>
-        <CardTitle className="text-2xl text-center font-cinzel">
-          <span className="text-white">GRUPO</span> <span className="text-[#D5AE77]">STUDIO</span>
-        </CardTitle>
-        <CardDescription className="text-center text-gray-400">
-          Portal de Dashboards
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form action={formAction} className="grid w-full items-center gap-4">
-          <div className="flex flex-col space-y-1.5">
-            <Label htmlFor="email" className="text-[#D5AE77]">Email</Label>
-            <Input id="email" name="email" type="email" placeholder="nome@exemplo.com" className="bg-[#1c1917] border-[#D5AE77]/20 text-white placeholder:text-gray-500" required />
+    <div className="space-y-8">
+      <div className="space-y-3">
+        <p className="eyebrow flex items-center gap-3 text-gold-text">
+          <span aria-hidden className="h-[3px] w-8 bg-gold" />
+          Área restrita
+        </p>
+        <h2 className="text-[1.9rem] font-extrabold leading-[1.1] tracking-[-0.02em] text-foreground">Acesse sua conta</h2>
+        <p className="text-[15px] text-muted-foreground">Entre com seu e-mail corporativo e sua senha.</p>
+      </div>
+
+      <form action={formAction} className="grid gap-5">
+        <div className="grid gap-2">
+          <Label htmlFor="email">E-mail corporativo</Label>
+          <div className="relative">
+            <Mail aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-faint" />
+            <Input
+              id="email"
+              name="email"
+              type="email"
+              placeholder="nome@grupostudio.com.br"
+              autoComplete="email"
+              required
+              className="h-12 pl-10 text-[15px]"
+            />
           </div>
-          <div className="flex flex-col space-y-1.5">
-            <Label htmlFor="password" className="text-[#D5AE77]">Senha</Label>
-            <Input id="password" name="password" type="password" className="bg-[#1c1917] border-[#D5AE77]/20 text-white" required />
+        </div>
+
+        <div className="grid gap-2">
+          <Label htmlFor="password">Senha</Label>
+          <PasswordInput id="password" name="password" autoComplete="current-password" required className="h-12 text-[15px]" />
+        </div>
+
+        <label htmlFor="remember" className="flex w-fit cursor-pointer items-center gap-2.5">
+          <Checkbox id="remember" name="remember" />
+          <span className="text-sm text-muted-foreground">Manter-me conectado</span>
+        </label>
+
+        {state?.error && (
+          <div
+            key={state.error}
+            role="alert"
+            className="flex animate-rise items-start gap-2.5 rounded-[4px] border border-danger/25 bg-danger/[0.07] px-3.5 py-3 text-sm text-danger"
+          >
+            <CircleAlert className="mt-0.5 size-4 shrink-0" />
+            <span>{state.error}</span>
           </div>
-          <div className="flex items-center space-x-2">
-             <Checkbox id="remember" name="remember" className="border-[#D5AE77] data-[state=checked]:bg-[#D5AE77] data-[state=checked]:text-black" />
-             <Label htmlFor="remember" className="text-gray-400 text-sm font-normal">Manter-se conectado</Label>
-          </div>
-          {state?.error && (
-            <p className="text-sm text-red-500 text-center font-medium bg-red-500/10 p-2 rounded">{state.error}</p>
-          )}
-          <SubmitButton />
-        </form>
-      </CardContent>
-      <CardFooter className="flex flex-col items-center gap-2">
-        <p className="text-xs text-gray-500">Área Restrita</p>
-      </CardFooter>
-    </Card>
+        )}
+
+        <SubmitButton />
+      </form>
+
+      <p className="border-t pt-6 text-[13px] leading-relaxed text-muted-foreground">
+        Problemas para acessar? Fale com o administrador do portal.
+      </p>
+    </div>
   )
 }

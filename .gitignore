@@ -56,3 +56,13 @@ temp_*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Fonte oficial Codec Pro (Zetafonts) — licença comercial, "all rights reserved".
+# O repositório é público: os .ttf NÃO podem ser versionados. No build de
+# produção eles vêm do bucket privado "brand-assets" do Supabase (veja o
+# next.config.ts); na sua máquina, basta tê-los nesta pasta. Sem eles, o portal
+# usa a Hanken Grotesk (fallback oficial do DS). O padrão CodecPro* barra cópias
+# soltas da fonte em qualquer outra pasta do projeto.
+/public/fonts/codec-pro/*
+!/public/fonts/codec-pro/README.md
+CodecPro*

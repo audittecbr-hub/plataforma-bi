@@ -2,46 +2,73 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { LayoutDashboard, Settings, ShieldCheck } from "lucide-react"
+import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
+import { NAV_ITEMS, isNavActive } from "@/lib/navigation"
+import { Hint } from "@/components/ui/tooltip"
+import { useSidebar } from "@/components/sidebar-shell"
 
 interface SidebarNavProps {
-    isAdmin?: boolean
+  isAdmin?: boolean
 }
 
 export function SidebarNav({ isAdmin }: SidebarNavProps) {
   const pathname = usePathname()
+  const { collapsed } = useSidebar()
 
-  const navItems = [
-    { href: "/dashboard", icon: LayoutDashboard, label: "Dashboard", active: pathname === "/dashboard" },
-    { href: "/dashboard/settings", icon: Settings, label: "Configurações", active: pathname === "/dashboard/settings" },
-    ...(isAdmin ? [{ href: "/dashboard/admin", icon: ShieldCheck, label: "Admin", active: pathname === "/dashboard/admin" }] : [])
-  ]
+  const portal = NAV_ITEMS.filter((item) => !item.adminOnly)
+  const gestao = isAdmin ? NAV_ITEMS.filter((item) => item.adminOnly) : []
 
-  return (
-    <nav className="grid items-start px-2 text-sm font-medium lg:px-4 gap-1 group-data-[collapsed=true]/sidebar:px-2 group-data-[collapsed=true]/sidebar:lg:px-2">
-      {navItems.map((item) => {
+  const renderGroup = (titulo: string, itens: typeof NAV_ITEMS) => (
+    <div className="space-y-1">
+      <p className="eyebrow h-6 overflow-hidden whitespace-nowrap px-[17px] text-[10px] leading-6 text-primary transition-opacity duration-200 group-data-[collapsed=true]/sidebar:opacity-0">
+        {titulo}
+      </p>
+      {itens.map((item) => {
         const Icon = item.icon
+        const active = isNavActive(pathname, item.href)
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            prefetch={true}
-            // O title vira a unica pista do que e o item quando a sidebar esta recolhida.
-            title={item.label}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 transition-colors duration-200",
-              "group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0",
-              item.active
-                ? "text-primary bg-primary/10"
-                : "text-muted-foreground hover:bg-card-foreground/5 hover:text-primary"
-            )}
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            <span className="truncate group-data-[collapsed=true]/sidebar:hidden">{item.label}</span>
-          </Link>
+          <Hint key={item.href} label={item.label} side="right" disabled={!collapsed}>
+            <Link
+              href={item.href}
+              prefetch={true}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "group/item relative flex h-10 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[14px] font-semibold outline-none",
+                "transition-colors duration-200 focus-visible:ring-[3px] focus-visible:ring-ring/25",
+                active ? "text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+              )}
+            >
+              {active && (
+                <motion.span
+                  layoutId="sidebar-active"
+                  aria-hidden
+                  className="absolute inset-0 rounded-[4px] bg-white/[0.07]"
+                  transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  <span className="absolute inset-y-2 left-0 w-[3px] bg-primary" />
+                </motion.span>
+              )}
+              <Icon
+                className={cn(
+                  "relative size-[18px] shrink-0 transition-colors",
+                  active ? "text-primary" : "text-muted-foreground group-hover/item:text-foreground"
+                )}
+              />
+              <span className="relative truncate transition-opacity duration-200 group-data-[collapsed=true]/sidebar:opacity-0">
+                {item.label}
+              </span>
+            </Link>
+          </Hint>
         )
       })}
+    </div>
+  )
+
+  return (
+    <nav aria-label="Navegação principal" className="flex flex-col gap-6 px-3 py-5">
+      {renderGroup("Portal", portal)}
+      {gestao.length > 0 && renderGroup("Gestão", gestao)}
     </nav>
   )
 }

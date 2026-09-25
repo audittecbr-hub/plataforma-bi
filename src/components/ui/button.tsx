@@ -3,26 +3,38 @@ import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
+/**
+ * Botões do Design System: raio de 4px, peso 600, entreletra 0.01em.
+ * Primário em dourado escuro que escurece no hover; secundário com borda preta
+ * que inverte no hover. Pressionar reduz a escala a 0.98 — sem "squish".
+ */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 cursor-pointer",
+  [
+    "relative inline-flex shrink-0 select-none items-center justify-center gap-2 whitespace-nowrap",
+    "rounded-[4px] border border-transparent text-sm font-semibold tracking-[0.01em] outline-none",
+    "transition-[background-color,border-color,color,box-shadow,opacity,scale] duration-200 ease-out-brand",
+    "focus-visible:ring-[3px] focus-visible:ring-ring/25",
+    "disabled:pointer-events-none disabled:opacity-40 active:scale-[0.98]",
+    "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  ],
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive:
-          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-        outline:
-          "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "bg-primary text-primary-foreground hover:bg-[var(--primary-hover)]",
+        destructive: "bg-destructive text-destructive-foreground hover:brightness-95 focus-visible:ring-destructive/25",
+        outline: "border-foreground bg-transparent text-foreground hover:bg-foreground hover:text-background",
+        secondary: "border-border bg-card text-foreground shadow-xs hover:border-foreground/40",
+        ghost: "text-muted-foreground hover:bg-accent hover:text-foreground",
+        subtle: "bg-gold-wash text-gold-text hover:bg-[color-mix(in_oklab,var(--gold-wash)_80%,var(--gold)_20%)]",
+        link: "h-auto border-0 px-0 text-gold-text underline-offset-4 hover:underline active:scale-100",
       },
       size: {
-        default: "h-10 px-4 py-2",
-        sm: "h-9 rounded-md px-3",
-        lg: "h-11 rounded-md px-8",
-        icon: "h-10 w-10",
+        default: "h-10 px-5",
+        sm: "h-8 px-3.5 text-[13px]",
+        lg: "h-12 px-7 text-[15px]",
+        icon: "size-10",
+        "icon-sm": "size-8",
+        "icon-xs": "size-7 [&_svg:not([class*='size-'])]:size-3.5",
       },
     },
     defaultVariants: {
@@ -43,6 +55,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button"
     return (
       <Comp
+        data-slot="button"
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}
         {...props}

@@ -1,38 +1,22 @@
 import { Skeleton } from '@/components/ui/skeleton'
+import { AdminPanelSkeleton } from '@/components/admin/admin-skeleton'
 
 export default function AdminLoading() {
     return (
-        <div className="flex flex-col gap-6 h-full animate-pulse">
-            <div className="flex items-center justify-between">
-                <Skeleton className="h-8 w-48 bg-[#D5AE77]/10" />
+        <div className="flex flex-col gap-6 lg:gap-8">
+            <div className="space-y-3">
+                <Skeleton className="h-3 w-40" />
+                <Skeleton className="h-11 w-96 max-w-[70vw]" />
+                <Skeleton className="h-4 w-80 max-w-[60vw]" />
             </div>
 
-            {/* Simulação do AdminTabsNav */}
-            <div className="w-full flex gap-1 p-1 bg-card border border-[#D5AE77]/20 rounded-md">
+            <div className="flex gap-7 border-b pb-3">
                 {[...Array(5)].map((_, i) => (
-                    <Skeleton key={i} className="h-10 flex-1 bg-[#D5AE77]/5" />
+                    <Skeleton key={i} className="h-5 w-24" />
                 ))}
             </div>
 
-            {/* Simulação da Tabela */}
-            <div className="flex flex-col gap-4 mt-4">
-                <div className="flex items-center justify-between mb-2">
-                    <Skeleton className="h-9 w-48 bg-[#D5AE77]/10" />
-                    <Skeleton className="h-9 w-32 bg-[#D5AE77]/10" />
-                </div>
-                
-                <div className="rounded-md border border-[#D5AE77]/10 overflow-hidden">
-                    <div className="h-10 bg-[#D5AE77]/5 w-full border-b border-[#D5AE77]/10" />
-                    {[...Array(5)].map((_, i) => (
-                        <div key={i} className="h-16 w-full border-b border-[#D5AE77]/10 flex items-center px-4 gap-4">
-                            <Skeleton className="h-4 w-1/4 bg-[#D5AE77]/5" />
-                            <Skeleton className="h-4 w-1/4 bg-[#D5AE77]/5" />
-                            <Skeleton className="h-4 w-1/4 bg-[#D5AE77]/5" />
-                            <Skeleton className="h-4 w-1/6 bg-[#D5AE77]/5 ml-auto" />
-                        </div>
-                    ))}
-                </div>
-            </div>
+            <AdminPanelSkeleton />
         </div>
     )
 }
