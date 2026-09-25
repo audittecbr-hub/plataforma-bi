@@ -20,7 +20,7 @@ export function AutomationTab({
     templates,
 }: AutomationTabProps) {
     return (
-        <div className="space-y-6 mt-4">
+        <div className="space-y-6">
              <div className="flex flex-col gap-6">
                 <ScheduleList 
                     schedules={schedules} 

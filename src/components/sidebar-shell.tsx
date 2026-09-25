@@ -1,27 +1,39 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { createContext, useCallback, useContext, useEffect, useState } from "react"
 import Link from "next/link"
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { ChevronLeft } from "lucide-react"
+import { BrandLogo, BrandSeal } from "@/components/brand/logo"
+import { Hint } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const STORAGE_KEY = "sidebar-collapsed"
-const LARGURA_ABERTA = "w-64"
-const LARGURA_FECHADA = "w-16"
+const LARGURA_ABERTA = "w-[272px]"
+const LARGURA_FECHADA = "w-[76px]"
+
+const SidebarContext = createContext<{ collapsed: boolean; toggle: () => void }>({
+  collapsed: false,
+  toggle: () => {},
+})
+
+/** Estado de recolhimento para os filhos client (ex.: ligar tooltips quando recolhida). */
+export function useSidebar() {
+  return useContext(SidebarContext)
+}
 
 /**
- * Casca client da sidebar: é ela que guarda o estado de recolhido e a largura.
+ * Casca client da sidebar: guarda o estado de recolhido e a largura.
  *
- * O `Sidebar` continua server component — ele define o server action do signOut
- * e lê cookies, então não pode virar client. Em vez de propagar o estado por
- * contexto (o que obrigaria a converter a árvore inteira), a casca publica um
- * `data-collapsed` e o conteúdo reage por CSS, com as variantes
- * `group-data-[collapsed=true]/sidebar:` do Tailwind. Nada abaixo daqui precisa
- * saber que existe estado.
+ * O `Sidebar` continua server component (lê a sessão e usa o server action de
+ * signOut). A casca publica um `data-collapsed` para o layout reagir por CSS
+ * (variantes `group-data-[collapsed=true]/sidebar:`) e um contexto para os
+ * filhos client que precisam do valor em JS — como os tooltips da navegação.
  *
- * A área principal do dashboard é um flex item com `w-full` e shrink padrão, ou
- * seja, ela ocupa o que sobra: estreitar a sidebar já a faz crescer sozinha.
+ * Ícones e avatar ficam no mesmo x nos dois estados: o recolhimento só anima a
+ * largura e esmaece os rótulos, sem nada "pular" no fim.
+ *
+ * A sidebar é sempre em preto premium (a classe `dark` troca os tokens só aqui
+ * dentro), com o logo oficial em branco — nos dois temas.
  */
 export function SidebarShell({ children }: { children: React.ReactNode }) {
   // Os dois valores vivem no mesmo state para que restaurar a preferência seja
@@ -52,43 +64,71 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  // Atalho "[" (fora de campos de texto) — o mesmo de Linear e Figma.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "[" || e.metaKey || e.ctrlKey || e.altKey) return
+      const alvo = e.target as HTMLElement | null
+      if (alvo && (alvo.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName))) return
+      toggle()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [toggle])
+
   return (
-    <div
-      data-collapsed={collapsed}
-      className={cn(
-        "group/sidebar relative flex h-full flex-col border-r bg-card text-card-foreground",
-        collapsed ? LARGURA_FECHADA : LARGURA_ABERTA,
-        mounted && "transition-[width] duration-200 ease-out"
-      )}
-    >
-      {/* Accent strip */}
-      <div className="absolute left-0 top-0 bottom-0 w-[3px] bg-gradient-to-b from-primary via-primary/60 to-transparent z-10 pointer-events-none" />
+    <SidebarContext.Provider value={{ collapsed, toggle }}>
+      <div
+        data-collapsed={collapsed}
+        className={cn(
+          "dark group/sidebar relative flex h-full flex-col border-r bg-background text-foreground",
+          collapsed ? LARGURA_FECHADA : LARGURA_ABERTA,
+          mounted && "transition-[width] duration-300 ease-out-brand"
+        )}
+      >
+        <div className="relative flex h-[84px] shrink-0 items-center overflow-hidden px-6">
+          <Link
+            href="/dashboard"
+            aria-label="Grupo Studio — início"
+            className="relative flex h-10 min-w-0 flex-1 items-center outline-none focus-visible:ring-[3px] focus-visible:ring-ring/25"
+          >
+            <BrandLogo
+              tone="white"
+              height={36}
+              priority
+              className="transition-opacity duration-200 group-data-[collapsed=true]/sidebar:pointer-events-none group-data-[collapsed=true]/sidebar:opacity-0"
+            />
+            <BrandSeal
+              tone="white"
+              size={34}
+              className="absolute left-[-3px] top-1/2 -translate-y-1/2 opacity-0 transition-opacity duration-200 group-data-[collapsed=true]/sidebar:opacity-100"
+            />
+          </Link>
+        </div>
 
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4 lg:h-[60px] lg:px-6 group-data-[collapsed=true]/sidebar:justify-center group-data-[collapsed=true]/sidebar:px-0 group-data-[collapsed=true]/sidebar:lg:px-0">
-        <Link
-          href="/"
-          className="flex min-w-0 flex-1 items-center gap-2 group-data-[collapsed=true]/sidebar:hidden"
-        >
-          <span className="font-cinzel text-xl tracking-wider whitespace-nowrap">
-            <span className="font-extralight text-foreground/70">GRUPO</span>
-            <span className="font-black text-primary"> STUDIO</span>
-          </span>
-        </Link>
+        {/* Filete dourado da marca sob o logo */}
+        <div className="mx-6 h-px bg-border" />
 
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={toggle}
-          aria-label={collapsed ? "Expandir menu" : "Minimizar menu"}
-          aria-expanded={!collapsed}
-          title={collapsed ? "Expandir menu" : "Minimizar menu"}
-          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-primary/10 hover:text-primary"
-        >
-          {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-        </Button>
+        {children}
+
+        {/* Alça de recolher na borda — fica acima do conteúdo vizinho */}
+        <Hint label={collapsed ? "Expandir menu" : "Recolher menu"} side="right" shortcut="[">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={collapsed ? "Expandir menu" : "Minimizar menu"}
+            aria-expanded={!collapsed}
+            className={cn(
+              "absolute -right-3 top-[30px] z-40 grid size-6 place-items-center rounded-full border bg-card text-muted-foreground shadow-sm outline-none",
+              "transition-[color,border-color] hover:border-primary hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/25"
+            )}
+          >
+            <ChevronLeft
+              className={cn("size-3.5 transition-transform duration-300 ease-out-brand", collapsed && "rotate-180")}
+            />
+          </button>
+        </Hint>
       </div>
-
-      {children}
-    </div>
+    </SidebarContext.Provider>
   )
 }

@@ -10,7 +10,7 @@ interface TemplatesTabProps {
 
 export function TemplatesTab({ templates, error }: TemplatesTabProps) {
     return (
-        <div className="mt-4">
+        <div>
             <TemplateList templates={templates} error={error} />
         </div>
     )

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion'
-import { cn } from '@/lib/utils'
+import { ChartColumnBig, Inbox, Link2Off } from 'lucide-react'
 
 import {
   Select,
@@ -13,8 +13,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Card, CardContent } from '@/components/ui/card'
+import { EmptyState } from '@/components/ui/empty-state'
 import { PowerBIEmbed } from '@/components/powerbi-embed'
+import { departmentGroup, GROUP_META } from '@/lib/department-meta'
+import { Gem } from 'lucide-react'
 
 import { Dashboard } from '@/lib/types'
 
@@ -22,6 +24,32 @@ interface DashboardSelectorProps {
   department: string
   dashboards: Dashboard[]
   headerContent?: React.ReactNode // Optional header content (e.g. Sub-department select)
+}
+
+/**
+ * Altura do palco do relatório. Com a página rolada até o visualizador, palco
+ * e barra de controles cabem juntos na janela (descontando topbar e o
+ * cabeçalho do card); nunca fica menor que um relatório legível.
+ */
+const REPORT_HEIGHT = 'max(540px, calc(100dvh - 16rem))'
+
+function ViewerTitle({ department, count }: { department: string; count: number }) {
+  const meta = GROUP_META[departmentGroup(department) ?? department]
+  const Icon = meta?.icon ?? Gem
+  const label = meta?.label ?? department
+  return (
+    <div className="flex min-w-0 items-center gap-3 py-3">
+      <span className="grid size-9 shrink-0 place-items-center rounded-[4px] bg-gold-wash text-gold-text">
+        <Icon className="size-[18px]" />
+      </span>
+      <div className="min-w-0 space-y-0.5 leading-tight">
+        <p className="truncate text-base font-bold tracking-[-0.01em] text-foreground">{label}</p>
+        <p className="eyebrow text-[10px] text-faint">
+          {count} {count === 1 ? 'relatório' : 'relatórios'}
+        </p>
+      </div>
+    </div>
+  )
 }
 
 export function DashboardSelector({ department, dashboards, headerContent }: DashboardSelectorProps) {
@@ -51,12 +79,12 @@ export function DashboardSelector({ department, dashboards, headerContent }: Das
       if (!groups[key]) groups[key] = []
       groups[key].push(d)
     })
-    
+
     // Garante que cada grupo esteja ordenado internamente e que os grupos também sigam ordem alfabética
     return Object.entries(groups)
       .sort(([keyA], [keyB]) => keyA.localeCompare(keyB, 'pt-BR'))
       .map(([key, items]) => {
-        const sortedItems = [...items].sort((a, b) => 
+        const sortedItems = [...items].sort((a, b) =>
           (a.name || '').trim().localeCompare((b.name || '').trim(), 'pt-BR', { sensitivity: 'base' })
         )
         return [key, sortedItems] as [string, Dashboard[]]
@@ -69,70 +97,112 @@ export function DashboardSelector({ department, dashboards, headerContent }: Das
   // Determine if we show the real embed or a placeholder
   const showEmbed = selectedUrl && !selectedUrl.includes('mock')
 
+  const orderedIds = groupedDashboards.flatMap(([, items]) => items.map((d) => d.id))
+  const position = currentDashboard ? orderedIds.indexOf(currentDashboard.id) + 1 : 0
+  const groupOfCurrent = currentDashboard ? currentDashboard.sub_group || currentDashboard.department : ''
+  const caption = currentDashboard ? `${groupOfCurrent} · ${currentDashboard.name}` : undefined
+
   return (
-    <div className="flex flex-col gap-4 h-full">
-      {/* Only show selector if there are dashboards (even if just one, per user request for consistency, 
-          or user said "deve conter uma box de select". 
-          Let's show it always if there is at least one dashboard to make it explicit) 
-      */}
-      <div className="flex flex-col md:flex-row gap-4">
-        {/* Optional Header Content (e.g. Area Select) */}
-        {headerContent}
+    <section className="relative flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+      {/* Filete dourado do DS no topo do card */}
+      <span aria-hidden className="pointer-events-none absolute left-5 top-0 z-10 h-[3px] w-10 bg-gold" />
+      <header className="flex flex-col gap-2 border-b px-3 pb-3 md:min-h-[64px] md:flex-row md:items-center md:justify-between md:gap-6 md:px-5 md:pb-0">
+        <div className="min-w-0 flex-1 self-stretch">
+          {headerContent ?? <ViewerTitle department={department} count={dashboards.length} />}
+        </div>
 
-        <div className={cn("w-full md:w-auto flex flex-col md:flex-row gap-2 flex-wrap items-center transition-opacity", dashboards.length === 0 && "hidden")}>
-            <Select value={selectedId} onValueChange={setSelectedId} disabled={dashboards.length <= 1}>
-              <SelectTrigger className="w-full md:w-64 bg-card/50 border-primary/20 text-foreground">
-                <SelectValue placeholder="Selecione um Dashboard" />
-              </SelectTrigger>
-              <SelectContent>
-                {groupedDashboards.map(([groupName, groupDashboards]) => (
-                  <SelectGroup key={groupName}>
-                    <SelectLabel className="text-primary font-bold">{groupName}</SelectLabel>
-                    {groupDashboards.map((dashboard) => (
-                      <SelectItem key={dashboard.id} value={dashboard.id}>
-                        {dashboard.name}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                ))}
-              </SelectContent>
-            </Select>
+        {dashboards.length > 1 && (
+          <Select value={selectedId} onValueChange={setSelectedId}>
+            <SelectTrigger
+              aria-label="Selecionar relatório"
+              className="h-11 w-full shrink-0 pl-1.5 pr-3 md:w-[340px]"
+            >
+              <span className="flex min-w-0 items-center gap-2.5">
+                <span className="grid size-8 shrink-0 place-items-center rounded-[3px] bg-gold-wash text-gold-text">
+                  <ChartColumnBig className="size-4 text-gold-text" />
+                </span>
+                <span className="flex min-w-0 flex-col items-start gap-0.5 leading-none">
+                  <span className="eyebrow text-[9px] leading-none text-faint">
+                    Relatório {position > 0 && `· ${position} de ${dashboards.length}`}
+                  </span>
+                  <span className="max-w-full truncate text-[13.5px] font-semibold text-foreground">
+                    <SelectValue placeholder="Selecione um relatório" />
+                  </span>
+                </span>
+              </span>
+            </SelectTrigger>
+            <SelectContent position="popper" align="end" className="max-h-[min(60vh,440px)] w-[var(--radix-select-trigger-width)] min-w-[300px]">
+              {groupedDashboards.map(([groupName, groupDashboards]) => (
+                <SelectGroup key={groupName}>
+                  <SelectLabel className="flex items-center gap-2">
+                    <span aria-hidden className="size-1.5 rounded-full bg-gold" />
+                    {groupName}
+                  </SelectLabel>
+                  {groupDashboards.map((dashboard) => (
+                    <SelectItem key={dashboard.id} value={dashboard.id}>
+                      {dashboard.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+
+        {dashboards.length === 1 && currentDashboard && (
+          <div className="flex h-11 w-full shrink-0 items-center gap-2.5 rounded-[4px] border bg-surface pl-1.5 pr-4 md:w-auto md:max-w-[340px]">
+            <span className="grid size-8 shrink-0 place-items-center rounded-[3px] bg-gold-wash text-gold-text">
+              <ChartColumnBig className="size-4" />
+            </span>
+            <span className="flex min-w-0 flex-col gap-0.5 leading-none">
+              <span className="eyebrow text-[9px] leading-none text-faint">Relatório único</span>
+              <span className="truncate text-[13.5px] font-semibold text-foreground">{currentDashboard.name}</span>
+            </span>
           </div>
-      </div>
+        )}
+      </header>
 
-      <div className="flex-1 min-h-[500px]">
-        <AnimatePresence mode="wait">
+      <div className="relative">
+        <AnimatePresence mode="wait" initial={false}>
           <motion.div
             key={selectedUrl || 'empty'}
-            initial={prefersReducedMotion ? false : { opacity: 0, y: 10 }}
+            initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
             animate={prefersReducedMotion ? {} : { opacity: 1, y: 0 }}
-            exit={prefersReducedMotion ? {} : { opacity: 0, x: -10 }}
-            transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.3 }}
-            className="h-full"
+            exit={prefersReducedMotion ? {} : { opacity: 0, y: -6 }}
+            transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
           >
             {showEmbed ? (
-              <PowerBIEmbed 
-                src={selectedUrl} 
-                title={`${department} - ${currentDashboard?.name}`} 
-                height="75vh" 
+              <PowerBIEmbed
+                src={selectedUrl}
+                title={`${department} - ${currentDashboard?.name}`}
+                caption={caption}
+                height={REPORT_HEIGHT}
               />
             ) : (
-              <Card className="h-full border-none bg-card/50">
-                <CardContent className="h-full flex items-center justify-center">
-                  <div className="text-center space-y-4">
-                    <h2 className="text-2xl font-bold text-primary">
-                      {department} - {currentDashboard?.name || 'Dashboard'}
-                    </h2>
-                    <p className="text-muted-foreground">
-                      URL não configurada. Aguardando link do Power BI.
-                    </p>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="grid place-items-center bg-grid" style={{ minHeight: REPORT_HEIGHT }}>
+                {dashboards.length === 0 ? (
+                  <EmptyState
+                    icon={Inbox}
+                    title="Nenhum relatório por aqui"
+                    description="Ainda não há dashboards publicados para esta área. Assim que forem cadastrados, eles aparecem aqui automaticamente."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={Link2Off}
+                    title="Relatório aguardando publicação"
+                    description={
+                      <>
+                        <span className="font-medium text-foreground">{currentDashboard?.name || 'Este dashboard'}</span>{' '}
+                        ainda não tem um link do Power BI configurado. Fale com o administrador do portal.
+                      </>
+                    }
+                  />
+                )}
+              </div>
             )}
           </motion.div>
         </AnimatePresence>
       </div>
-    </div>
+    </section>
   )
 }

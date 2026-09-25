@@ -1,14 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Activity, CircleAlert, Monitor, ShieldX, Smartphone } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Search, ChevronLeft, ChevronRight, CheckCircle, XCircle, ShieldX } from 'lucide-react'
+import { Avatar } from '@/components/ui/avatar'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Panel, PanelHeader, PanelToolbar } from '@/components/ui/panel'
+import { PaginationBar, SearchField } from '@/components/admin/admin-ui'
 import type { AccessLog } from '@/app/actions/automation'
+import { cn } from '@/lib/utils'
 
 interface AccessLogListProps {
     accessLogs?: AccessLog[]
@@ -17,43 +18,79 @@ interface AccessLogListProps {
 
 const ITEMS_PER_PAGE = 15
 
-function formatDate(dateStr: string) {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('pt-BR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-    })
+const FILTERS = [
+    { value: 'all', label: 'Todos' },
+    { value: 'login_success', label: 'Sucesso' },
+    { value: 'login_failed', label: 'Falhou' },
+    { value: 'blocked', label: 'Bloqueado' },
+] as const
+
+// Fuso fixo: o servidor roda em UTC e o navegador no horário local — sem isso o
+// HTML do servidor e a hidratação divergem (e o admin via a hora em UTC).
+const TIMEZONE = 'America/Sao_Paulo'
+
+function formatDay(dateStr: string) {
+    return new Date(dateStr).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: TIMEZONE })
+}
+
+function formatTime(dateStr: string) {
+    return new Date(dateStr).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', timeZone: TIMEZONE })
+}
+
+/** Navegador e sistema a partir do user-agent — só para leitura humana. */
+function describeDevice(ua: string | null) {
+    if (!ua) return null
+    const browser = /Edg\//.test(ua)
+        ? 'Edge'
+        : /OPR\/|Opera/.test(ua)
+            ? 'Opera'
+            : /Firefox\//.test(ua)
+                ? 'Firefox'
+                : /SamsungBrowser/.test(ua)
+                    ? 'Samsung Internet'
+                    : /Chrome\//.test(ua)
+                        ? 'Chrome'
+                        : /Safari\//.test(ua)
+                            ? 'Safari'
+                            : 'Navegador'
+    const os = /Windows/.test(ua)
+        ? 'Windows'
+        : /iPhone|iPad|iPod/.test(ua)
+            ? 'iOS'
+            : /Android/.test(ua)
+                ? 'Android'
+                : /Mac OS X|Macintosh/.test(ua)
+                    ? 'macOS'
+                    : /Linux/.test(ua)
+                        ? 'Linux'
+                        : 'Sistema desconhecido'
+    const mobile = /Mobile|iPhone|Android/.test(ua)
+    return { label: `${browser} · ${os}`, mobile }
 }
 
 function EventBadge({ eventType }: { eventType: string }) {
     switch (eventType) {
         case 'login_success':
-            return (
-                <Badge className="bg-green-600 hover:bg-green-700 flex items-center gap-1">
-                    <CheckCircle className="h-3 w-3" />
-                    Sucesso
-                </Badge>
-            )
+            return <Badge variant="success" dot>Sucesso</Badge>
         case 'login_failed':
-            return (
-                <Badge variant="destructive" className="flex items-center gap-1">
-                    <XCircle className="h-3 w-3" />
-                    Falhou
-                </Badge>
-            )
+            return <Badge variant="danger" dot>Falhou</Badge>
         case 'blocked':
-            return (
-                <Badge variant="secondary" className="bg-orange-600 hover:bg-orange-700 flex items-center gap-1">
-                    <ShieldX className="h-3 w-3" />
-                    Bloqueado
-                </Badge>
-            )
+            return <Badge variant="warning" dot>Bloqueado</Badge>
         default:
             return <Badge variant="outline">{eventType}</Badge>
     }
+}
+
+function Device({ ua }: { ua: string | null }) {
+    const device = describeDevice(ua)
+    if (!device) return <span className="text-faint">—</span>
+    const Icon = device.mobile ? Smartphone : Monitor
+    return (
+        <span className="inline-flex items-center gap-2 text-[13px] text-muted-foreground" title={ua ?? undefined}>
+            <Icon className="size-4 text-faint" />
+            {device.label}
+        </span>
+    )
 }
 
 export function AccessLogList({ accessLogs, error }: AccessLogListProps) {
@@ -61,16 +98,24 @@ export function AccessLogList({ accessLogs, error }: AccessLogListProps) {
     const [filterType, setFilterType] = useState<string>('all')
     const [currentPage, setCurrentPage] = useState(1)
 
+    const counts = {
+        all: accessLogs?.length ?? 0,
+        login_success: accessLogs?.filter((l) => l.event_type === 'login_success').length ?? 0,
+        login_failed: accessLogs?.filter((l) => l.event_type === 'login_failed').length ?? 0,
+        blocked: accessLogs?.filter((l) => l.event_type === 'blocked').length ?? 0,
+    }
+    const successRate = counts.all ? Math.round((counts.login_success / counts.all) * 100) : 0
+
     // Filter Logic
     const filteredLogs = accessLogs?.filter(log => {
         const searchLower = searchTerm.toLowerCase()
-        const matchesSearch = 
+        const matchesSearch =
             (log.email?.toLowerCase() || '').includes(searchLower) ||
             (log.user?.full_name?.toLowerCase() || '').includes(searchLower) ||
             (log.ip_address?.toLowerCase() || '').includes(searchLower)
-        
+
         const matchesType = filterType === 'all' || log.event_type === filterType
-        
+
         return matchesSearch && matchesType
     }) || []
 
@@ -79,8 +124,8 @@ export function AccessLogList({ accessLogs, error }: AccessLogListProps) {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
     const paginatedLogs = filteredLogs.slice(startIndex, startIndex + ITEMS_PER_PAGE)
 
-    const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setSearchTerm(e.target.value)
+    const handleSearch = (value: string) => {
+        setSearchTerm(value)
         setCurrentPage(1)
     }
 
@@ -92,151 +137,141 @@ export function AccessLogList({ accessLogs, error }: AccessLogListProps) {
     const goToNextPage = () => setCurrentPage(p => Math.min(totalPages, p + 1))
     const goToPrevPage = () => setCurrentPage(p => Math.max(1, p - 1))
 
+    const stats = [
+        { label: 'Eventos', value: counts.all, hint: 'Últimos registros' },
+        { label: 'Sucesso', value: counts.login_success, hint: `${successRate}% das tentativas` },
+        { label: 'Falhas', value: counts.login_failed, hint: 'Senha ou e-mail inválidos' },
+        { label: 'Bloqueados', value: counts.blocked, hint: 'Acesso negado' },
+    ]
+
     return (
-        <Card className="border-none bg-card mt-4">
-            <CardHeader className="flex flex-col gap-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                    <CardTitle>Logs de Acesso</CardTitle>
-                    <div className="text-sm text-muted-foreground">
-                        {filteredLogs.length} registros
+        <div className="space-y-6">
+            {!error && (
+                <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                    {stats.map((s) => (
+                        <div key={s.label} className="relative rounded-xl border bg-card p-5 shadow-xs">
+                            <span aria-hidden className="absolute left-5 top-0 h-[3px] w-8 bg-gold" />
+                            <dt className="eyebrow text-[10px] text-faint">{s.label}</dt>
+                            <dd className="mt-2 text-[2rem] font-extrabold leading-none tracking-[-0.02em] tabular-nums text-foreground">{s.value}</dd>
+                            <dd className="mt-1.5 text-xs text-muted-foreground">{s.hint}</dd>
+                        </div>
+                    ))}
+                </dl>
+            )}
+
+            <Panel>
+                <PanelHeader
+                    icon={Activity}
+                    eyebrow="Segurança"
+                    title="Logs de acesso"
+                    description="Entradas no portal com resultado, dispositivo e endereço de origem."
+                    actions={<span className="text-[13px] text-muted-foreground tabular-nums">{filteredLogs.length} registros</span>}
+                />
+
+                <PanelToolbar className="lg:justify-between">
+                    <SearchField
+                        id="busca-acessos"
+                        value={searchTerm}
+                        onChange={handleSearch}
+                        placeholder="Pesquisar por e-mail, nome ou IP…"
+                    />
+                    <div role="radiogroup" aria-label="Tipo de evento" className="scrollbar-none flex gap-1 overflow-x-auto rounded-[4px] border bg-card p-1">
+                        {FILTERS.map((f) => {
+                            const active = filterType === f.value
+                            return (
+                                <button
+                                    key={f.value}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
+                                    onClick={() => handleFilterChange(f.value)}
+                                    className={cn(
+                                        "flex shrink-0 items-center gap-2 rounded-[3px] px-3 py-1.5 text-[13px] font-semibold outline-none transition-colors duration-200",
+                                        "focus-visible:ring-[3px] focus-visible:ring-ring/25",
+                                        active ? "bg-ink text-white dark:bg-white dark:text-ink" : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    )}
+                                >
+                                    {f.label}
+                                    <span className={cn("text-[11px] tabular-nums", active ? "opacity-70" : "text-faint")}>
+                                        {counts[f.value]}
+                                    </span>
+                                </button>
+                            )
+                        })}
                     </div>
-                </div>
-                
-                {/* Filters Row */}
-                <div className="flex flex-col sm:flex-row gap-4">
-                    {/* Search Bar */}
-                    <div className="relative flex-1 sm:max-w-sm">
-                        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input
-                            type="search"
-                            placeholder="Pesquisar por email, nome ou IP..."
-                            className="pl-9 bg-background border-input text-foreground placeholder:text-muted-foreground focus-visible:ring-[#D5AE77]"
-                            value={searchTerm}
-                            onChange={handleSearch}
-                        />
-                    </div>
-                    
-                    {/* Type Filter */}
-                    <Select value={filterType} onValueChange={handleFilterChange}>
-                        <SelectTrigger className="w-full sm:w-44 bg-background border-input text-foreground">
-                            <SelectValue placeholder="Tipo de evento" />
-                        </SelectTrigger>
-                        <SelectContent className="bg-background border-border">
-                            <SelectItem value="all">Todos</SelectItem>
-                            <SelectItem value="login_success">Sucesso</SelectItem>
-                            <SelectItem value="login_failed">Falhou</SelectItem>
-                            <SelectItem value="blocked">Bloqueado</SelectItem>
-                        </SelectContent>
-                    </Select>
-                </div>
-            </CardHeader>
-            <CardContent>
+                </PanelToolbar>
+
                 {error ? (
-                    <p className="text-red-500">Erro: {error}</p>
+                    <EmptyState compact icon={CircleAlert} title="Não foi possível carregar os logs" description={error} />
+                ) : paginatedLogs.length === 0 ? (
+                    <EmptyState compact icon={ShieldX} title="Nenhum log encontrado" description="Ajuste a busca ou o filtro de evento." />
                 ) : (
-                    <div className="space-y-4">
-                        {/* Mobile View */}
-                        <div className="grid grid-cols-1 gap-4 md:hidden">
+                    <>
+                        {/* Mobile */}
+                        <ul className="divide-y border-t md:hidden">
                             {paginatedLogs.map((log) => (
-                                <div key={log.id} className="flex flex-col space-y-2 rounded-lg border border-[#D5AE77]/20 bg-card p-4">
-                                    <div className="flex items-center justify-between">
-                                        <span className="font-medium text-white truncate">{log.email}</span>
+                                <li key={log.id} className="space-y-2 px-5 py-4">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <p className="truncate text-sm font-semibold text-foreground">{log.user?.full_name || log.email}</p>
                                         <EventBadge eventType={log.event_type} />
                                     </div>
-                                    {log.user?.full_name && (
-                                        <div className="text-sm text-gray-400">{log.user.full_name}</div>
-                                    )}
-                                    <div className="text-xs text-muted-foreground">
-                                        {formatDate(log.created_at)}
+                                    {log.user?.full_name && <p className="truncate text-[13px] text-muted-foreground">{log.email}</p>}
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground tabular-nums">
+                                        <span>{formatDay(log.created_at)} · {formatTime(log.created_at)}</span>
+                                        {log.ip_address && <span className="font-mono">{log.ip_address}</span>}
                                     </div>
-                                    {log.ip_address && (
-                                        <div className="text-xs text-muted-foreground font-mono">
-                                            IP: {log.ip_address}
-                                        </div>
-                                    )}
-                                </div>
+                                    <Device ua={log.user_agent} />
+                                </li>
                             ))}
-                            {paginatedLogs.length === 0 && (
-                                <div className="text-center py-6 text-muted-foreground">
-                                    Nenhum log encontrado.
-                                </div>
-                            )}
-                        </div>
+                        </ul>
 
-                        {/* Desktop View */}
-                        <div className="hidden md:block overflow-x-auto rounded-md border border-[#D5AE77]/20">
+                        {/* Desktop */}
+                        <div className="hidden border-t md:block">
                             <Table>
-                                <TableHeader className="bg-secondary/50">
-                                    <TableRow className="border-[#D5AE77]/20 hover:bg-muted/50">
-                                        <TableHead className="text-[#D5AE77] font-semibold">Data/Hora</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Email</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Usuário</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Evento</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">IP</TableHead>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Data</TableHead>
+                                        <TableHead>Usuário</TableHead>
+                                        <TableHead>Evento</TableHead>
+                                        <TableHead>Dispositivo</TableHead>
+                                        <TableHead>IP</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     {paginatedLogs.map((log) => (
-                                        <TableRow key={log.id} className="border-[#D5AE77]/10 hover:bg-muted/50 transition-colors">
-                                            <TableCell className="text-foreground whitespace-nowrap">
-                                                {formatDate(log.created_at)}
+                                        <TableRow key={log.id}>
+                                            <TableCell className="tabular-nums">
+                                                <p className="font-semibold text-foreground">{formatDay(log.created_at)}</p>
+                                                <p className="text-xs text-muted-foreground">{formatTime(log.created_at)}</p>
                                             </TableCell>
-                                            <TableCell className="font-medium text-foreground">
-                                                {log.email}
-                                            </TableCell>
-                                            <TableCell className="text-muted-foreground">
-                                                {log.user?.full_name || '-'}
+                                            <TableCell>
+                                                <div className="flex items-center gap-3">
+                                                    <Avatar name={log.user?.full_name} email={log.email} size={32} />
+                                                    <div className="min-w-0">
+                                                        <p className="truncate font-semibold text-foreground">{log.user?.full_name || '—'}</p>
+                                                        <p className="truncate text-[13px] text-muted-foreground">{log.email}</p>
+                                                    </div>
+                                                </div>
                                             </TableCell>
                                             <TableCell>
                                                 <EventBadge eventType={log.event_type} />
                                             </TableCell>
-                                            <TableCell className="text-muted-foreground font-mono text-xs">
-                                                {log.ip_address || '-'}
+                                            <TableCell>
+                                                <Device ua={log.user_agent} />
+                                            </TableCell>
+                                            <TableCell className="font-mono text-xs text-muted-foreground">
+                                                {log.ip_address || '—'}
                                             </TableCell>
                                         </TableRow>
                                     ))}
-                                    {paginatedLogs.length === 0 && (
-                                        <TableRow>
-                                            <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                                                Nenhum log encontrado.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
                                 </TableBody>
                             </Table>
                         </div>
-
-                        {/* Pagination Controls */}
-                        {totalPages > 1 && (
-                            <div className="flex items-center justify-between border-t border-[#D5AE77]/20 pt-4">
-                                <div className="text-sm text-muted-foreground">
-                                    Página <span className="text-foreground font-medium">{currentPage}</span> de <span className="text-foreground font-medium">{totalPages}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={goToPrevPage}
-                                        disabled={currentPage === 1}
-                                        className="h-8 w-8 p-0 border-input text-foreground hover:bg-accent disabled:opacity-50"
-                                    >
-                                        <ChevronLeft className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={goToNextPage}
-                                        disabled={currentPage === totalPages}
-                                        className="h-8 w-8 p-0 border-input text-foreground hover:bg-accent disabled:opacity-50"
-                                    >
-                                        <ChevronRight className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
+                    </>
                 )}
-            </CardContent>
-        </Card>
+
+                <PaginationBar page={currentPage} totalPages={totalPages} onPrev={goToPrevPage} onNext={goToNextPage} />
+            </Panel>
+        </div>
     )
 }

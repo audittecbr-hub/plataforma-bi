@@ -10,7 +10,7 @@ interface AccessLogsTabProps {
 
 export function AccessLogsTab({ accessLogs, error }: AccessLogsTabProps) {
     return (
-        <div className="mt-4">
+        <div>
             <AccessLogList accessLogs={accessLogs} error={error} />
         </div>
     )

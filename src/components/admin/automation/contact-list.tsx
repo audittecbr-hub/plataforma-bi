@@ -1,27 +1,19 @@
 'use client'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { ContactDialog } from './contact-dialog'
-import { Trash2, Search, ChevronLeft, ChevronRight } from 'lucide-react'
-import { deleteContact, type AutomationContact } from '@/app/actions/automation'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-  } from "@/components/ui/alert-dialog"
+import { CircleAlert, Contact, Trash2 } from 'lucide-react'
 import { toast } from "sonner"
+import { Badge } from '@/components/ui/badge'
+import { Avatar } from '@/components/ui/avatar'
+import { DepartmentChip } from '@/components/ui/department-chip'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Panel, PanelHeader, PanelToolbar } from '@/components/ui/panel'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { DestructiveConfirm, IconAction, PaginationBar, SearchField } from '@/components/admin/admin-ui'
+import { ContactDialog } from './contact-dialog'
+import { deleteContact, type AutomationContact } from '@/app/actions/automation'
+import { contactDepartmentLabel } from '@/lib/department-meta'
 
 interface ContactListProps {
     contacts?: AutomationContact[]
@@ -30,10 +22,16 @@ interface ContactListProps {
 
 const ITEMS_PER_PAGE = 10
 
-function formatDepartment(dept: string | null) {
-    if (!dept) return '-'
-    if (dept.toLowerCase() === 'geral') return 'Diretoria'
-    return dept.charAt(0).toUpperCase() + dept.slice(1)
+/** "5551999887766" → "+55 (51) 99988-7766". Outros formatos passam intactos. */
+function formatPhone(phone: string | null) {
+    if (!phone) return null
+    const digits = phone.replace(/\D/g, '')
+    const br = digits.startsWith('55') && (digits.length === 12 || digits.length === 13) ? digits.slice(2) : null
+    if (!br) return phone
+    const ddd = br.slice(0, 2)
+    const rest = br.slice(2)
+    const split = rest.length === 9 ? 5 : 4
+    return `+55 (${ddd}) ${rest.slice(0, split)}-${rest.slice(split)}`
 }
 
 export function ContactList({ contacts, error }: ContactListProps) {
@@ -67,161 +65,111 @@ export function ContactList({ contacts, error }: ContactListProps) {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
     const paginatedContacts = filteredContacts.slice(startIndex, startIndex + ITEMS_PER_PAGE)
 
-    const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setSearchTerm(e.target.value)
+    const handleSearch = (value: string) => {
+        setSearchTerm(value)
         setCurrentPage(1) // Reset to first page on search
     }
 
     const goToNextPage = () => setCurrentPage(p => Math.min(totalPages, p + 1))
     const goToPrevPage = () => setCurrentPage(p => Math.max(1, p - 1))
 
-    return (
-        <Card className="border-none bg-card mt-4">
-            <CardHeader className="flex flex-col gap-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
-                    <CardTitle>Contatos de Automação</CardTitle>
-                    <ContactDialog />
-                </div>
-                
-                {/* Search Bar */}
-                <div className="relative w-full sm:w-72">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        type="search"
-                        placeholder="Pesquisar por nome, telefone..."
-                        className="pl-9 bg-background border-input text-foreground placeholder:text-muted-foreground focus-visible:ring-[#D5AE77]"
-                        value={searchTerm}
-                        onChange={handleSearch}
-                    />
-                </div>
-            </CardHeader>
-            <CardContent>
-                {error ? (
-                    <p className="text-red-500">Erro: {error}</p>
-                ) : (
-                    <div className="space-y-4">
-                         {/* Mobile View */}
-                        <div className="grid grid-cols-1 gap-4 md:hidden">
-                            {paginatedContacts.map((c) => (
-                                <div key={c.id} className="flex flex-col space-y-3 rounded-lg border bg-card p-4 shadow-sm">
-                                    <div className="flex items-center justify-between">
-                                        <div className="font-medium">{c.name}</div>
-                                        {c.active ? <Badge className="bg-green-600">Ativo</Badge> : <Badge variant="secondary">Inativo</Badge>}
-                                    </div>
-                                    <div className="text-sm text-muted-foreground">{c.phone || '-'} / {c.email || '-'}</div>
-                                    <div className="text-sm text-muted-foreground">{formatDepartment(c.department)}</div>
-                                    
-                                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#D5AE77]/10">
-                                         <ContactDialog contactToEdit={c} />
-                                         <DeleteConfirm id={c.id} onDelete={handleDelete} name={c.name} />
-                                    </div>
-                                </div>
-                            ))}
-                            {paginatedContacts.length === 0 && (
-                                <div className="text-center py-6 text-muted-foreground">
-                                    Nenhum contato encontrado.
-                                </div>
-                            )}
-                        </div>
+    const status = (c: AutomationContact) =>
+        c.active ? <Badge variant="gold" dot>Ativo</Badge> : <Badge variant="outline">Inativo</Badge>
 
-                        {/* Desktop View */}
-                        <div className="hidden md:block overflow-x-auto rounded-md border border-[#D5AE77]/20">
-                            <Table>
-                                <TableHeader className="bg-secondary/50">
-                                    <TableRow className="border-[#D5AE77]/20 hover:bg-[#1c1917]">
-                                        <TableHead className="text-[#D5AE77] font-semibold">Nome</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Telefone</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Email</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Departamento</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold">Status</TableHead>
-                                        <TableHead className="text-[#D5AE77] font-semibold text-right">Ações</TableHead>
+    const actions = (c: AutomationContact) => (
+        <div className="flex items-center justify-end gap-0.5">
+            <ContactDialog contactToEdit={c} />
+            <DestructiveConfirm
+                trigger={<IconAction label="Excluir contato" icon={Trash2} tone="danger" />}
+                title="Excluir contato?"
+                description={<>Você tem certeza que deseja excluir <span className="font-semibold text-foreground">{c.name}</span>? Essa ação não pode ser desfeita.</>}
+                onConfirm={() => handleDelete(c.id)}
+            />
+        </div>
+    )
+
+    return (
+        <Panel>
+            <PanelHeader
+                icon={Contact}
+                eyebrow="Automação"
+                title="Contatos de envio"
+                description="Quem recebe os relatórios automáticos por WhatsApp e e-mail."
+                actions={<ContactDialog />}
+            />
+
+            <PanelToolbar>
+                <SearchField
+                    id="busca-contatos"
+                    value={searchTerm}
+                    onChange={handleSearch}
+                    placeholder="Pesquisar por nome, telefone…"
+                />
+            </PanelToolbar>
+
+            {error ? (
+                <EmptyState compact icon={CircleAlert} title="Não foi possível carregar os contatos" description={error} />
+            ) : paginatedContacts.length === 0 ? (
+                <EmptyState compact icon={Contact} title="Nenhum contato encontrado" description={searchTerm ? `Nada corresponde a “${searchTerm}”.` : 'Adicione o primeiro contato de envio.'} />
+            ) : (
+                <>
+                    {/* Mobile */}
+                    <ul className="divide-y border-t md:hidden">
+                        {paginatedContacts.map((c) => (
+                            <li key={c.id} className="flex items-start gap-3 px-5 py-4">
+                                <Avatar name={c.name} size={40} />
+                                <div className="min-w-0 flex-1 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="truncate text-sm font-semibold text-foreground">{c.name}</p>
+                                        {status(c)}
+                                    </div>
+                                    <p className="truncate text-[13px] tabular-nums text-muted-foreground">{formatPhone(c.phone) || '—'}</p>
+                                    {c.email && <p className="truncate text-[13px] text-muted-foreground">{c.email}</p>}
+                                    <div className="flex items-center justify-between gap-2 pt-1">
+                                        <DepartmentChip label={contactDepartmentLabel(c.department)} />
+                                        {actions(c)}
+                                    </div>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+
+                    {/* Desktop */}
+                    <div className="hidden border-t md:block">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Contato</TableHead>
+                                    <TableHead>WhatsApp</TableHead>
+                                    <TableHead>E-mail</TableHead>
+                                    <TableHead>Departamento</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {paginatedContacts.map((c) => (
+                                    <TableRow key={c.id}>
+                                        <TableCell>
+                                            <div className="flex items-center gap-3">
+                                                <Avatar name={c.name} size={32} />
+                                                <span className="font-semibold text-foreground">{c.name}</span>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell className="tabular-nums text-muted-foreground">{formatPhone(c.phone) || '—'}</TableCell>
+                                        <TableCell className="text-muted-foreground">{c.email || '—'}</TableCell>
+                                        <TableCell><DepartmentChip label={contactDepartmentLabel(c.department)} /></TableCell>
+                                        <TableCell>{status(c)}</TableCell>
+                                        <TableCell className="text-right">{actions(c)}</TableCell>
                                     </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {paginatedContacts.map((c) => (
-                                        <TableRow key={c.id} className="border-[#D5AE77]/10 hover:bg-white/5 transition-colors">
-                                            <TableCell className="font-medium text-foreground whitespace-nowrap py-3">{c.name}</TableCell>
-                                            <TableCell className="text-muted-foreground">{c.phone}</TableCell>
-                                            <TableCell className="text-muted-foreground">{c.email}</TableCell>
-                                            <TableCell className="text-muted-foreground">{formatDepartment(c.department)}</TableCell>
-                                            <TableCell>
-                                                {c.active ? <Badge className="bg-green-600 hover:bg-green-700">Ativo</Badge> : <Badge variant="secondary">Inativo</Badge>}
-                                            </TableCell>
-                                            <TableCell className="text-right flex items-center justify-end gap-2 py-3">
-                                                <ContactDialog contactToEdit={c} />
-                                                <DeleteConfirm id={c.id} onDelete={handleDelete} name={c.name} />
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                    {paginatedContacts.length === 0 && (
-                                        <TableRow>
-                                            <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
-                                                Nenhum contato encontrado.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-
-                        {/* Pagination Controls */}
-                        {totalPages > 1 && (
-                            <div className="flex items-center justify-between border-t border-[#D5AE77]/20 pt-4">
-                                <div className="text-sm text-muted-foreground">
-                                    Página <span className="text-foreground font-medium">{currentPage}</span> de <span className="text-foreground font-medium">{totalPages}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={goToPrevPage}
-                                        disabled={currentPage === 1}
-                                        className="h-8 w-8 p-0 border-input text-foreground hover:bg-accent disabled:opacity-50"
-                                    >
-                                        <ChevronLeft className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={goToNextPage}
-                                        disabled={currentPage === totalPages}
-                                        className="h-8 w-8 p-0 border-input text-foreground hover:bg-accent disabled:opacity-50"
-                                    >
-                                        <ChevronRight className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
+                                ))}
+                            </TableBody>
+                        </Table>
                     </div>
-                )}
-            </CardContent>
-        </Card>
+                </>
+            )}
+
+            <PaginationBar page={currentPage} totalPages={totalPages} onPrev={goToPrevPage} onNext={goToNextPage} />
+        </Panel>
     )
 }
-
-function DeleteConfirm({ id, onDelete, name }: { id: string, onDelete: (id: string) => void, name: string }) {
-    return (
-        <AlertDialog>
-            <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-100/10">
-                    <Trash2 className="h-4 w-4" />
-                </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="bg-card text-foreground border-[#D5AE77]/20">
-                <AlertDialogHeader>
-                    <AlertDialogTitle className="text-[#D5AE77]">Excluir Contato?</AlertDialogTitle>
-                    <AlertDialogDescription className="text-muted-foreground">
-                        Você tem certeza que deseja excluir <b>{name}</b>? Essa ação não pode ser desfeita.
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel className="bg-transparent border-input hover:bg-accent text-foreground">Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => onDelete(id)} className="bg-red-600 hover:bg-red-700 text-white border-none">
-                        Excluir
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
-    )
-}
-

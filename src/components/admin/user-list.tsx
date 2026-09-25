@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useTransition, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { CircleAlert, Users, UserRound } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
-import { Search, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
+import { Avatar } from '@/components/ui/avatar'
+import { DepartmentChip } from '@/components/ui/department-chip'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Panel, PanelHeader, PanelToolbar } from '@/components/ui/panel'
+import { PaginationBar, SearchField } from '@/components/admin/admin-ui'
 import { deleteUser, type AdminUser } from '@/app/dashboard/admin/actions'
 import { UserDialog } from '@/components/admin/user-dialog'
 import { DeleteConfirmation } from '@/components/admin/delete-confirmation'
@@ -20,6 +22,29 @@ interface UserListProps {
     currentPage?: number
     initialSearch?: string
     error?: string
+}
+
+function RoleBadges({ user }: { user: AdminUser }) {
+    return (
+        <div className="flex flex-wrap items-center gap-1.5">
+            {user.is_admin && <Badge variant="solid">Admin</Badge>}
+            {user.is_leader && <Badge variant="gold">Líder</Badge>}
+            {!user.is_admin && !user.is_leader && <Badge variant="outline">Colaborador</Badge>}
+        </div>
+    )
+}
+
+function ExtraAreas({ user }: { user: AdminUser }) {
+    const extras = user.allowed_sub_departments?.length ?? 0
+    if (!extras) return null
+    return (
+        <span
+            className="text-xs text-muted-foreground"
+            title={user.allowed_sub_departments?.join(', ')}
+        >
+            +{extras} {extras === 1 ? 'área' : 'áreas'}
+        </span>
+    )
 }
 
 export function UserList({
@@ -80,134 +105,117 @@ export function UserList({
             router.push(`?${createQueryString({ page: currentPage - 1 })}`)
         })
     }
-    
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        setSearchTerm(e.target.value)
-    }
+
+    const hasUsers = (users?.length ?? 0) > 0
 
     return (
-        <Card className="border-none bg-card mt-4">
-            <CardHeader className="flex flex-col gap-4">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <CardTitle>Gestão de Usuários</CardTitle>
-                    <UserDialog />
-                </div>
-                
-                {/* Search Bar */}
-                <div className="relative w-full sm:w-72">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        type="search"
-                        placeholder="Pesquisar por nome..."
-                        className="pl-9 bg-background border-input text-foreground placeholder:text-muted-foreground focus-visible:ring-primary"
-                        value={searchTerm}
-                        onChange={handleInputChange}
-                    />
-                     {isPending && <div className="absolute right-3 top-2.5"><Loader2 className="h-4 w-4 animate-spin text-muted-foreground"/></div>}
-                </div>
-            </CardHeader>
-            <CardContent>
-                {error ? (
-                    <p className="text-red-500">Erro ao carregar usuários: {error}</p>
-                ) : (
-                    <div className={cn("space-y-4 transition-opacity", isPending ? "opacity-50" : "")}>
-                        {/* Mobile Card View */}
-                        <div className="grid grid-cols-1 gap-4 md:hidden">
-                            {users?.map((u) => (
-                                <div key={`mobile-${u.id}`} className="flex flex-col space-y-3 rounded-lg border bg-card p-4 shadow-sm">
-                                    <div className="flex items-center justify-between">
-                                        <div className="font-medium text-foreground">{u.full_name}</div>
-                                        {u.is_admin ? <Badge className="bg-primary text-primary-foreground hover:bg-primary/90">Admin</Badge> : <Badge variant="outline" className="text-gray-400 border-gray-700">Usuário</Badge>}
-                                    </div>
-                                    <div className="text-sm text-gray-400">{u.email}</div>
-                                    <div className="text-sm text-gray-300">
-                                        <span className="font-semibold text-primary">Departamento:</span> {u.department || '-'}
-                                    </div>
-                                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-primary/10">
-                                        <UserDialog userToEdit={u} allUsers={allUsers} />
-                                        <DeleteConfirmation 
-                                            id={u.id} 
-                                            itemType="User" 
-                                            deleteAction={deleteUser} 
-                                        />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
+        <Panel>
+            <PanelHeader
+                icon={Users}
+                eyebrow="Acesso"
+                title="Gestão de usuários"
+                description="Contas do portal, departamento principal, permissões extras e papéis."
+                actions={<UserDialog />}
+            />
 
-                        {/* Desktop Table View */}
-                        <div className="hidden md:block overflow-x-auto rounded-md border border-primary/20">
-                            <Table>
-                                <TableHeader className="bg-secondary/50">
-                                    <TableRow className="border-primary/20 hover:bg-muted/50">
-                                        <TableHead className="text-primary font-semibold">Nome</TableHead>
-                                        <TableHead className="text-primary font-semibold">E-mail</TableHead>
-                                        <TableHead className="text-primary font-semibold">Departamento</TableHead>
-                                        <TableHead className="text-primary font-semibold">Função</TableHead>
-                                        <TableHead className="text-primary font-semibold text-right">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {users?.map((u) => (
-                                        <TableRow key={u.id} className="border-primary/10 hover:bg-muted/50 transition-colors">
-                                            <TableCell className="font-medium text-foreground whitespace-nowrap py-3">{u.full_name}</TableCell>
-                                            <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                                            <TableCell className="text-muted-foreground">{u.department}</TableCell>
-                                            <TableCell>
-                                                {u.is_admin ? <Badge className="bg-primary text-primary-foreground hover:bg-primary/90">Admin</Badge> : <Badge variant="outline" className="text-gray-400 border-gray-700">Usuário</Badge>}
-                                            </TableCell>
-                                            <TableCell className="text-right flex items-center justify-end gap-2 py-3">
+            <PanelToolbar>
+                <SearchField
+                    id="busca-usuarios"
+                    value={searchTerm}
+                    onChange={setSearchTerm}
+                    placeholder="Pesquisar por nome…"
+                    pending={isPending}
+                />
+            </PanelToolbar>
+
+            {error ? (
+                <EmptyState compact icon={CircleAlert} title="Não foi possível carregar os usuários" description={error} />
+            ) : !hasUsers ? (
+                <EmptyState
+                    compact
+                    icon={UserRound}
+                    title="Nenhum usuário encontrado"
+                    description={searchTerm ? `Nada corresponde a “${searchTerm}”.` : 'Adicione o primeiro usuário do portal.'}
+                />
+            ) : (
+                <div className={cn("transition-opacity duration-200", isPending && "opacity-50")}>
+                    {/* Mobile */}
+                    <ul className="divide-y border-t md:hidden">
+                        {users?.map((u) => (
+                            <li key={`mobile-${u.id}`} className="flex items-start gap-3 px-5 py-4">
+                                <Avatar name={u.full_name} email={u.email} size={40} />
+                                <div className="min-w-0 flex-1 space-y-2">
+                                    <div>
+                                        <p className="truncate text-sm font-semibold text-foreground">{u.full_name}</p>
+                                        <p className="truncate text-[13px] text-muted-foreground">{u.email}</p>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <DepartmentChip department={u.department} />
+                                        <ExtraAreas user={u} />
+                                    </div>
+                                    <RoleBadges user={u} />
+                                </div>
+                                <div className="flex shrink-0 items-center gap-0.5">
+                                    <UserDialog userToEdit={u} allUsers={allUsers} />
+                                    <DeleteConfirmation id={u.id} itemType="User" itemName={u.full_name ?? u.email} deleteAction={deleteUser} />
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+
+                    {/* Desktop */}
+                    <div className="hidden border-t md:block">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Usuário</TableHead>
+                                    <TableHead>Departamento</TableHead>
+                                    <TableHead>Papel</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {users?.map((u) => (
+                                    <TableRow key={u.id}>
+                                        <TableCell>
+                                            <div className="flex items-center gap-3">
+                                                <Avatar name={u.full_name} email={u.email} size={36} />
+                                                <div className="min-w-0">
+                                                    <p className="truncate font-semibold text-foreground">{u.full_name}</p>
+                                                    <p className="truncate text-[13px] text-muted-foreground">{u.email}</p>
+                                                </div>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className="flex items-center gap-2.5">
+                                                <DepartmentChip department={u.department} />
+                                                <ExtraAreas user={u} />
+                                            </div>
+                                        </TableCell>
+                                        <TableCell>
+                                            <RoleBadges user={u} />
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <div className="flex items-center justify-end gap-0.5">
                                                 <UserDialog userToEdit={u} allUsers={allUsers} />
-                                                <DeleteConfirmation 
-                                                    id={u.id} 
-                                                    itemType="User" 
-                                                    deleteAction={deleteUser} 
-                                                />
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                    {users?.length === 0 && (
-                                        <TableRow>
-                                            <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                                                Nenhum usuário encontrado.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-
-                        {/* Pagination Controls */}
-                        {totalPages > 1 && (
-                            <div className="flex items-center justify-between border-t border-primary/20 pt-4">
-                                <div className="text-sm text-muted-foreground">
-                                    Página <span className="text-foreground font-medium">{currentPage}</span> de <span className="text-foreground font-medium">{totalPages}</span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={goToPrevPage}
-                                        disabled={currentPage <= 1 || isPending}
-                                        className="h-8 w-8 p-0 border-input text-foreground hover:bg-accent disabled:opacity-50"
-                                    >
-                                        <ChevronLeft className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={goToNextPage}
-                                        disabled={currentPage >= totalPages || isPending}
-                                        className="h-8 w-8 p-0 border-input text-foreground hover:bg-accent disabled:opacity-50"
-                                    >
-                                        <ChevronRight className="h-4 w-4" />
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
+                                                <DeleteConfirmation id={u.id} itemType="User" itemName={u.full_name ?? u.email} deleteAction={deleteUser} />
+                                            </div>
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
                     </div>
-                )}
-            </CardContent>
-        </Card>
+
+                    <PaginationBar
+                        page={currentPage}
+                        totalPages={totalPages}
+                        onPrev={goToPrevPage}
+                        onNext={goToNextPage}
+                        disabled={isPending}
+                    />
+                </div>
+            )}
+        </Panel>
     )
 }

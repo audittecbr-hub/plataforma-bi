@@ -1,28 +1,35 @@
 'use client'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { TemplateDialog } from './template-dialog'
-import { Trash2, MessageSquareText } from 'lucide-react'
-import { deleteTemplate, type AutomationTemplate } from '@/app/actions/automation'
+import { CircleAlert, MessageSquareText, Trash2 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-  } from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
+import { EmptyState } from '@/components/ui/empty-state'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { DestructiveConfirm, IconAction } from '@/components/admin/admin-ui'
+import { TemplateDialog } from './template-dialog'
+import { splitTemplate } from './template-variables'
+import { deleteTemplate, type AutomationTemplate } from '@/app/actions/automation'
 
 interface TemplateListProps {
     templates?: AutomationTemplate[]
     error?: string
+}
+
+/** Prévia da mensagem com as variáveis destacadas. */
+function TemplatePreview({ content }: { content: string }) {
+    return (
+        <p className="line-clamp-4 whitespace-pre-line text-[13.5px] leading-relaxed text-muted-foreground">
+            {splitTemplate(content).map((part, i) =>
+                /^\{[a-z_]+\}$/.test(part) ? (
+                    <span key={i} className="rounded-[2px] bg-gold-wash px-1 py-px font-mono text-[12px] font-medium text-gold-text">
+                        {part}
+                    </span>
+                ) : (
+                    <span key={i}>{part}</span>
+                )
+            )}
+        </p>
+    )
 }
 
 export function TemplateList({ templates, error }: TemplateListProps) {
@@ -39,102 +46,41 @@ export function TemplateList({ templates, error }: TemplateListProps) {
     }
 
     return (
-        <Card className="border-none bg-card/50 mt-4">
-            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
-                <CardTitle className="flex items-center gap-2">
-                    <MessageSquareText className="h-5 w-5 text-[#D5AE77]" />
-                    Templates de Mensagem
-                </CardTitle>
-                <TemplateDialog />
-            </CardHeader>
-            <CardContent>
-                {error ? (
-                    <p className="text-red-500">Erro: {error}</p>
-                ) : (
-                    <div className="space-y-4">
-                        {/* Mobile View */}
-                        <div className="grid grid-cols-1 gap-4 md:hidden">
-                            {templates?.map((t) => (
-                                <div key={t.id} className="flex flex-col space-y-3 rounded-lg border bg-card p-4 shadow-sm">
-                                    <div className="flex items-center justify-between">
-                                        <div className="font-medium">{t.name}</div>
-                                    </div>
-                                    <div className="text-sm text-muted-foreground truncate line-clamp-2 bg-black/20 p-2 rounded font-mono">
-                                        {t.content}
-                                    </div>
-                                    
-                                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#D5AE77]/10">
-                                         <TemplateDialog templateToEdit={t} />
-                                         <DeleteConfirm id={t.id} onDelete={handleDelete} name={t.name} />
-                                    </div>
+        <Panel>
+            <PanelHeader
+                icon={MessageSquareText}
+                eyebrow="Automação"
+                title="Templates de mensagem"
+                description="Textos usados nos envios automáticos, com variáveis preenchidas na hora do disparo."
+                actions={<TemplateDialog />}
+            />
+
+            {error ? (
+                <EmptyState compact icon={CircleAlert} title="Não foi possível carregar os templates" description={error} />
+            ) : !templates?.length ? (
+                <EmptyState compact icon={MessageSquareText} title="Nenhum template cadastrado" description="Crie o primeiro modelo de mensagem." />
+            ) : (
+                <ul className="grid gap-4 border-t p-5 sm:grid-cols-2 md:p-6 xl:grid-cols-3">
+                    {templates.map((t) => (
+                        <li key={t.id} className="group relative flex flex-col gap-3 rounded-xl border bg-surface p-5 transition-shadow duration-200 hover:shadow-md">
+                            <span aria-hidden className="absolute left-5 top-0 h-[3px] w-8 bg-gold" />
+                            <div className="flex items-start justify-between gap-3">
+                                <p className="pt-1 text-[15px] font-bold leading-snug tracking-[-0.01em] text-foreground">{t.name}</p>
+                                <div className="-mr-2 -mt-1 flex shrink-0 items-center gap-0.5">
+                                    <TemplateDialog templateToEdit={t} />
+                                    <DestructiveConfirm
+                                        trigger={<IconAction label="Excluir template" icon={Trash2} tone="danger" />}
+                                        title="Excluir template?"
+                                        description={<>Você tem certeza que deseja excluir <span className="font-semibold text-foreground">{t.name}</span>?</>}
+                                        onConfirm={() => handleDelete(t.id)}
+                                    />
                                 </div>
-                            ))}
-                        </div>
-
-                        {/* Desktop View */}
-                        <div className="hidden md:block overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead className="w-[200px]">Nome</TableHead>
-                                        <TableHead>Conteúdo (Preview)</TableHead>
-                                        <TableHead className="text-right w-[100px]">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {templates?.map((t) => (
-                                        <TableRow key={t.id}>
-                                            <TableCell className="font-medium">{t.name}</TableCell>
-                                            <TableCell className="max-w-[400px]">
-                                                <div className="truncate font-mono text-xs text-gray-400">
-                                                    {t.content}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell className="text-right flex items-center justify-end gap-2">
-                                                <TemplateDialog templateToEdit={t} />
-                                                <DeleteConfirm id={t.id} onDelete={handleDelete} name={t.name} />
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                    {templates?.length === 0 && (
-                                        <TableRow>
-                                            <TableCell colSpan={3} className="text-center py-6 text-muted-foreground">
-                                                Nenhum template cadastrado.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    )
-}
-
-function DeleteConfirm({ id, onDelete, name }: { id: string, onDelete: (id: string) => void, name: string }) {
-    return (
-        <AlertDialog>
-            <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-100/10">
-                    <Trash2 className="h-4 w-4" />
-                </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="bg-[#322E2B] text-white border-[#D5AE77]/20">
-                <AlertDialogHeader>
-                    <AlertDialogTitle className="text-[#D5AE77]">Excluir Template?</AlertDialogTitle>
-                    <AlertDialogDescription className="text-gray-400">
-                        Você tem certeza que deseja excluir <b>{name}</b>?
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel className="bg-transparent border-gray-600 hover:bg-white/10 text-white">Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => onDelete(id)} className="bg-red-600 hover:bg-red-700 text-white border-none">
-                        Excluir
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+                            </div>
+                            <TemplatePreview content={t.content} />
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </Panel>
     )
 }

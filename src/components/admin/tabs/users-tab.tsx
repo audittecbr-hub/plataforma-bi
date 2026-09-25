@@ -14,7 +14,7 @@ interface UsersTabProps {
 
 export function UsersTab({ users, allUsers, totalPages, currentPage, search, error }: UsersTabProps) {
     return (
-        <div className="mt-4">
+        <div>
             <UserList
                 users={users}
                 allUsers={allUsers}

@@ -1,25 +1,16 @@
 'use client'
 
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Panel, PanelHeader } from '@/components/ui/panel'
+import { DestructiveConfirm, IconAction } from '@/components/admin/admin-ui'
 import { ScheduleDialog } from './schedule-dialog'
-import { Trash2, Users, Play } from 'lucide-react'
+import { CalendarClock, CircleAlert, Play, Trash2, Users } from 'lucide-react'
 import { deleteSchedule, triggerAutomation, type AutomationSchedule, type AutomationDefinition, type AutomationContact, type AutomationTemplate } from '@/app/actions/automation'
-
-import { Button } from '@/components/ui/button'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-    AlertDialogTrigger,
-  } from "@/components/ui/alert-dialog"
 import { toast } from "sonner"
+import { useRealtimeQueue } from '@/hooks/use-realtime-queue'
+import { cn } from '@/lib/utils'
 
 interface ScheduleListProps {
     schedules?: AutomationSchedule[]
@@ -29,17 +20,37 @@ interface ScheduleListProps {
     error?: string
 }
 
+// 0 = domingo
+const DAY_LETTERS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S']
+const DAY_NAMES = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado']
+
 function formatDays(days: number[] | null) {
     if (!days || days.length === 0) return 'Nenhum dia'
-    // 0=Sun
-    const map = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab']
-    return days.map(d => map[d]).join(', ')
+    return days.map(d => DAY_NAMES[d]).join(', ')
 }
 
-import { useRealtimeQueue } from '@/hooks/use-realtime-queue'
-import { Loader2, CheckCircle, XCircle, Clock } from 'lucide-react'
-
-// ... (existing imports)
+/** Semana em sete marcadores; os dias ativos ficam preenchidos. */
+function WeekDots({ days }: { days: number[] | null }) {
+    return (
+        <div className="flex gap-1" aria-label={formatDays(days)} title={formatDays(days)}>
+            {DAY_LETTERS.map((letter, i) => {
+                const on = !!days?.includes(i)
+                return (
+                    <span
+                        key={i}
+                        aria-hidden
+                        className={cn(
+                            "grid size-5 place-items-center rounded-full text-[9.5px] font-bold",
+                            on ? "bg-ink text-white dark:bg-white dark:text-ink" : "bg-muted text-faint"
+                        )}
+                    >
+                        {letter}
+                    </span>
+                )
+            })}
+        </div>
+    )
+}
 
 export function ScheduleList({ schedules, definitions = [], contacts = [], templates = [], error }: ScheduleListProps) {
 
@@ -67,168 +78,130 @@ export function ScheduleList({ schedules, definitions = [], contacts = [], templ
         )
     }
 
-
-    // Helper to get status UI
-    const getStatusBadge = (scheduleId: string) => {
-        const job = jobs[scheduleId]
-        // Only show if recent (e.g. created in last 1 hour? For now just show if in state)
-        if (!job) return null
-
-        // Auto-hide completed/failed after some time? 
-        // For now let's just show it.
-        
-        switch (job.status) {
+    // Status em tempo real da fila; sem job recente, mostra ativo/inativo
+    const getStatusBadge = (schedule: AutomationSchedule) => {
+        const job = jobs[schedule.id]
+        switch (job?.status) {
             case 'pending':
-                return <Badge variant="outline" className="text-yellow-500 border-yellow-500 gap-1"><Clock className="w-3 h-3" /> Na Fila</Badge>
+                return <Badge variant="warning" dot>Na fila</Badge>
             case 'processing':
-                return <Badge variant="outline" className="text-blue-500 border-blue-500 gap-1 animate-pulse"><Loader2 className="w-3 h-3 animate-spin" /> Executando</Badge>
+                return <Badge variant="info" dot pulse>Executando</Badge>
             case 'completed':
-                return <Badge variant="outline" className="text-green-500 border-green-500 gap-1"><CheckCircle className="w-3 h-3" /> Concluído</Badge>
+                return <Badge variant="success" dot>Concluído</Badge>
             case 'failed':
-                return <Badge variant="outline" className="text-red-500 border-red-500 gap-1"><XCircle className="w-3 h-3" /> Erro</Badge>
+                return <Badge variant="danger" dot>Erro</Badge>
             default:
-                return null
+                return schedule.active
+                    ? <Badge variant="gold" dot>Ativo</Badge>
+                    : <Badge variant="outline">Inativo</Badge>
         }
     }
 
-    return (
-        <Card className="border-none bg-card mt-4">
-            {/* ... (Header) ... */}
-            <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
-                <CardTitle>Agendamentos Ativos</CardTitle>
-                <ScheduleDialog definitions={definitions} contacts={contacts} templates={templates} />
-            </CardHeader>
-            <CardContent>
-                {error ? (
-                    <p className="text-red-500">Erro: {error}</p>
-                ) : (
-                    <div className="space-y-4">
-                        {/* Mobile View */}
-                         <div className="grid grid-cols-1 gap-4 md:hidden">
-                            {schedules?.map((s) => (
-                                <div key={s.id} className="flex flex-col space-y-3 rounded-lg border bg-card p-4 shadow-sm">
-                                    <div className="flex items-center justify-between">
-                                        <div className="font-medium">{s.name}</div>
-                                        {/* Status Badge from Realtime */}
-                                        {getStatusBadge(s.id) || (s.active ? <Badge className="bg-green-600">Ativo</Badge> : <Badge variant="secondary">Inativo</Badge>)}
-                                    </div>
-                                    <div className="text-sm">
-                                        <span className="text-[#D5AE77] font-semibold">{s.definition?.name}</span> • {s.scheduled_time}
-                                    </div>
-                                    <div className="text-sm text-muted-foreground">
-                                        {formatDays(s.days_of_week)}
-                                    </div>
-                                    {/* Show Logs if failed */}
-                                    {jobs[s.id]?.status === 'failed' && (
-                                        <div className="text-xs text-red-400 bg-red-950/30 p-2 rounded">
-                                            {jobs[s.id].logs?.slice(0, 100)}...
-                                        </div>
-                                    )}
-                                    <div className="text-sm text-foreground flex items-center gap-2">
-                                        <Users className="h-3 w-3" /> {s.recipients?.length || 0} destinatários
-                                    </div>
-                                    
-                                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-[#D5AE77]/10">
-                                         <Button variant="ghost" size="sm" onClick={() => handleTrigger(s.id, s.name)} className="h-8 w-8 p-0 text-green-500 hover:text-green-700 hover:bg-green-100/10" title="Executar Agora">
-                                            <Play className="h-4 w-4" />
-                                         </Button>
-                                         <ScheduleDialog scheduleToEdit={s} definitions={definitions} contacts={contacts} templates={templates} />
-                                         <DeleteConfirm id={s.id} onDelete={handleDelete} name={s.name} />
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Desktop View */}
-                        <div className="hidden md:block overflow-x-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Nome</TableHead>
-                                        <TableHead>Tipo</TableHead>
-                                        <TableHead>Horário/Dias</TableHead>
-                                        <TableHead>Destinatários</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {schedules?.map((s) => (
-                                        <TableRow key={s.id}>
-                                            <TableCell className="font-medium">
-                                                <div className="flex flex-col">
-                                                    <span>{s.name}</span>
-                                                    {/* Show Logs Preview if failed */}
-                                                    {jobs[s.id]?.status === 'failed' && (
-                                                        <span className="text-xs text-red-400 max-w-[200px] truncate" title={jobs[s.id].logs || ''}>
-                                                            Erro: {jobs[s.id].logs}
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>{s.definition?.name}</TableCell>
-                                            <TableCell>
-                                                <div className="flex flex-col">
-                                                    <span>{s.scheduled_time}</span>
-                                                    <span className="text-xs text-muted-foreground">{formatDays(s.days_of_week)}</span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <Badge variant="outline" className="gap-1">
-                                                    <Users className="h-3 w-3" /> {s.recipients?.length || 0}
-                                                </Badge>
-                                            </TableCell>
-                                            <TableCell>
-                                                {getStatusBadge(s.id) || (s.active ? <Badge className="bg-green-600 hover:bg-green-700">Ativo</Badge> : <Badge variant="secondary">Inativo</Badge>)}
-                                            </TableCell>
-                                            <TableCell className="text-right flex items-center justify-end gap-2">
-                                                <Button variant="ghost" size="sm" onClick={() => handleTrigger(s.id, s.name)} className="h-8 w-8 p-0 text-green-500 hover:text-green-700 hover:bg-green-100/10" title="Executar Agora">
-                                                    <Play className="h-4 w-4" />
-                                                </Button>
-                                                <ScheduleDialog scheduleToEdit={s} definitions={definitions} contacts={contacts} templates={templates} />
-                                                <DeleteConfirm id={s.id} onDelete={handleDelete} name={s.name} />
-                                            </TableCell>
-                                        </TableRow>
-                                    ))}
-                                     {schedules?.length === 0 && (
-                                        <TableRow>
-                                            <TableCell colSpan={6} className="text-center py-6 text-muted-foreground">
-                                                Nenhum agendamento ativo.
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </div>
-                )}
-            </CardContent>
-        </Card>
+    const actions = (s: AutomationSchedule) => (
+        <div className="flex items-center justify-end gap-0.5">
+            <IconAction label="Executar agora" icon={Play} tone="success" onClick={() => handleTrigger(s.id, s.name)} />
+            <ScheduleDialog scheduleToEdit={s} definitions={definitions} contacts={contacts} templates={templates} />
+            <DestructiveConfirm
+                trigger={<IconAction label="Excluir agendamento" icon={Trash2} tone="danger" />}
+                title="Excluir agendamento?"
+                description={<>Você tem certeza que deseja excluir <span className="font-semibold text-foreground">{s.name}</span>?</>}
+                onConfirm={() => handleDelete(s.id)}
+            />
+        </div>
     )
-}
 
-function DeleteConfirm({ id, onDelete, name }: { id: string, onDelete: (id: string) => void, name: string }) {
     return (
-        <AlertDialog>
-            <AlertDialogTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-red-500 hover:text-red-700 hover:bg-red-100/10">
-                    <Trash2 className="h-4 w-4" />
-                </Button>
-            </AlertDialogTrigger>
-            <AlertDialogContent className="bg-card text-foreground border-[#D5AE77]/20">
-                <AlertDialogHeader>
-                    <AlertDialogTitle className="text-[#D5AE77]">Excluir Agendamento?</AlertDialogTitle>
-                    <AlertDialogDescription className="text-muted-foreground">
-                        Você tem certeza que deseja excluir <b>{name}</b>?
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel className="bg-transparent border-input hover:bg-accent text-foreground">Cancelar</AlertDialogCancel>
-                    <AlertDialogAction onClick={() => onDelete(id)} className="bg-red-600 hover:bg-red-700 text-white border-none">
-                        Excluir
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+        <Panel>
+            <PanelHeader
+                icon={CalendarClock}
+                eyebrow="Automação"
+                title="Agendamentos"
+                description="Relatórios enviados automaticamente por horário e dia da semana."
+                actions={<ScheduleDialog definitions={definitions} contacts={contacts} templates={templates} />}
+            />
+
+            {error ? (
+                <EmptyState compact icon={CircleAlert} title="Não foi possível carregar os agendamentos" description={error} />
+            ) : !schedules?.length ? (
+                <EmptyState compact icon={CalendarClock} title="Nenhum agendamento" description="Crie a primeira automação de envio." />
+            ) : (
+                <>
+                    {/* Mobile */}
+                    <ul className="divide-y border-t md:hidden">
+                        {schedules.map((s) => (
+                            <li key={s.id} className="space-y-3 px-5 py-4">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-semibold text-foreground">{s.name}</p>
+                                        <p className="truncate text-[13px] text-muted-foreground">{s.definition?.name}</p>
+                                    </div>
+                                    {getStatusBadge(s)}
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3">
+                                    <span className="text-lg font-extrabold tabular-nums tracking-[-0.01em] text-foreground">{s.scheduled_time?.slice(0, 5)}</span>
+                                    <WeekDots days={s.days_of_week} />
+                                </div>
+                                {jobs[s.id]?.status === 'failed' && (
+                                    <p className="rounded-[4px] bg-danger/[0.06] px-2.5 py-1.5 font-mono text-xs text-danger">
+                                        {jobs[s.id].logs?.slice(0, 100)}…
+                                    </p>
+                                )}
+                                <div className="flex items-center justify-between border-t pt-2">
+                                    <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
+                                        <Users className="size-3.5" /> {s.recipients?.length || 0} destinatários
+                                    </span>
+                                    {actions(s)}
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+
+                    {/* Desktop */}
+                    <div className="hidden border-t md:block">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Automação</TableHead>
+                                    <TableHead>Horário</TableHead>
+                                    <TableHead>Dias</TableHead>
+                                    <TableHead>Destinatários</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead className="text-right">Ações</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {schedules.map((s) => (
+                                    <TableRow key={s.id}>
+                                        <TableCell className="max-w-[320px]">
+                                            <p className="truncate font-semibold text-foreground">{s.name}</p>
+                                            <p className="truncate text-[13px] text-muted-foreground">{s.definition?.name}</p>
+                                            {/* Show Logs Preview if failed */}
+                                            {jobs[s.id]?.status === 'failed' && (
+                                                <p className="mt-1 max-w-[280px] truncate font-mono text-xs text-danger" title={jobs[s.id].logs || ''}>
+                                                    Erro: {jobs[s.id].logs}
+                                                </p>
+                                            )}
+                                        </TableCell>
+                                        <TableCell>
+                                            <span className="text-base font-extrabold tabular-nums tracking-[-0.01em] text-foreground">{s.scheduled_time?.slice(0, 5)}</span>
+                                        </TableCell>
+                                        <TableCell>
+                                            <WeekDots days={s.days_of_week} />
+                                        </TableCell>
+                                        <TableCell>
+                                            <span className="flex items-center gap-1.5 text-[13px] text-muted-foreground tabular-nums">
+                                                <Users className="size-3.5" /> {s.recipients?.length || 0}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell>{getStatusBadge(s)}</TableCell>
+                                        <TableCell className="text-right">{actions(s)}</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                </>
+            )}
+        </Panel>
     )
 }

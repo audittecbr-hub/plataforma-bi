@@ -1,8 +1,34 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
-@custom-variant dark (&:is(.dark *));
+/* `dark:` vale dentro de .dark (tema escuro ou ilha escura, como a sidebar) e
+   nunca dentro de uma ilha .light (ex.: o formulário do login). */
+@custom-variant dark (&:is(.dark *):not(.light *));
 
-@theme {
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ *  GRUPO STUDIO · Design System oficial aplicado ao portal
+ *
+ *  Pilares da marca: profissionalismo, credibilidade e sofisticação.
+ *
+ *  Regras do DS que este arquivo implementa:
+ *    · Paleta travada: preto #1f1f1f, dourado escuro #927245, dourado claro
+ *      #d5ae77, cinza claro #ebebeb e branco. Os demais tons são as variações
+ *      funcionais do próprio DS (hover, borda, texto secundário) — nunca cor
+ *      decorativa nova.
+ *    · Tipografia única: Codec Pro (Hanken Grotesk como fallback oficial).
+ *    · Sem gradientes em superfícies de marca, sem texturas além do grid hairline.
+ *    · Raios contidos: 4px em botões/campos, 8px em cards. Pílulas só em tags.
+ *    · Sombras neutras e baixas; nunca brilho colorido.
+ *    · Movimento calmo: fades e deslocamentos curtos, sem mola nem overshoot.
+ *    · O dourado é acento: filete, sobrelinha, palavra-chave, botão.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+@theme inline {
+  --font-sans: "Codec Pro", var(--font-hanken), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -22,149 +48,379 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-faint: var(--faint);
+  --color-gold: var(--gold);
+  --color-gold-text: var(--gold-text);
+  --color-gold-wash: var(--gold-wash);
+  --color-ink: var(--gs-black);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 8px;
+  --radius-2xl: 8px;
+  --radius-3xl: 8px;
+
+  --shadow-xs: var(--elev-xs);
+  --shadow-sm: var(--elev-sm);
+  --shadow-md: var(--elev-md);
+  --shadow-lg: var(--elev-lg);
+  --shadow-xl: var(--elev-xl);
+
+  --ease-out-brand: var(--gs-ease-out);
+  --ease-in-out-brand: var(--gs-ease-in-out);
+
+  --animate-rise: rise 0.46s var(--gs-ease-out) both;
+  --animate-fade: fade 0.46s var(--gs-ease-out) both;
+  --animate-sweep: sweep 1.8s ease-in-out infinite;
+  --animate-indeterminate: indeterminate 1.4s var(--gs-ease-in-out) infinite;
+  --animate-pulse-ring: pulse-ring 2.4s var(--gs-ease-out) infinite;
 }
 
 :root {
-  /* Group Studio Palette (Light Mode) */
-  --background: #cdcdcd; /* Cinza Neutro (User Request: Dark Background for content contrast) */
-  --foreground: #322e2b; /* Taupe Escuro */
+  --radius: 8px;
 
-  --card: #ffffff;
-  --card-foreground: #322e2b;
+  --gs-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --gs-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 
-  --popover: #ffffff;
-  --popover-foreground: #322e2b;
+  /* Paleta institucional (travada) */
+  --gs-black: #1f1f1f;
+  --gs-gold-dark: #927245;
+  --gs-gold-light: #d5ae77;
+  --gs-gray-light: #ebebeb;
+  --gs-white: #ffffff;
 
-  --primary: #8E6F42; /* Bronze Nobre (levemente escurecido para contraste WCAG AA 4.6:1) */
-  --primary-foreground: #fdfdfd;
-
-  --secondary: #cdcdcd; /* Cinza Neutro (User Request: Darker than #ebebeb) */
-  --secondary-foreground: #322e2b;
-
-  --muted: #cdcdcd;
-  --muted-foreground: #5c5d5e; /* Cinza Escuro (escurecido para contraste WCAG AA 4.5:1 em bg #cdcdcd) */
-
-  --accent: #d5ae77; /* Duna (Used for active states/highlights) */
-  --accent-foreground: #322e2b;
-
-  --destructive: #ef4444;
-  --destructive-foreground: #fdfdfd;
-
-  --border: #cdcdcd; /* Cinza Neutro */
-  --input: #cdcdcd;
-  --ring: #927245;
-
-  --radius: 0.5rem;
-
-  /* Sidebar specific (Light) */
-  --sidebar: #fdfdfd;
-  --sidebar-foreground: #322e2b;
-  --sidebar-primary: #8E6F42; /* Ajustado junto com --primary */
-  --sidebar-primary-foreground: #fdfdfd;
-  --sidebar-accent: #ebebeb;
-  --sidebar-accent-foreground: #927245;
-  --sidebar-border: #cdcdcd;
-  --sidebar-ring: #927245;
+  /* Variações funcionais do DS */
+  --gs-black-90: #353535;
+  --gs-black-70: #5c5c5c;
+  --gs-ink-muted: #6b6b6b;
+  --gs-gold-dark-hover: #7c6038;
+  --gs-gold-tint: #f3ead9;
+  --gs-gray-mid: #d8d8d8;
+  --gs-gray-50: #f6f6f6;
+  --gs-line-dark: rgb(255 255 255 / 0.14);
 }
 
+/* ── Claro: branco / cinza claro ──────────────────────────────────
+   `.light` força o tema claro numa ilha, mesmo com o app no escuro. */
+:root,
+.light {
+  --background: var(--gs-gray-50);
+  --foreground: var(--gs-black);
+  --card: var(--gs-white);
+  --card-foreground: var(--gs-black);
+  --popover: var(--gs-white);
+  --popover-foreground: var(--gs-black);
+
+  --primary: var(--gs-gold-dark);
+  --primary-hover: var(--gs-gold-dark-hover);
+  --primary-foreground: var(--gs-white);
+
+  --secondary: var(--gs-gray-light);
+  --secondary-foreground: var(--gs-black);
+  --muted: var(--gs-gray-light);
+  --muted-foreground: var(--gs-black-70);
+  --faint: var(--gs-ink-muted);
+  --accent: rgb(31 31 31 / 0.045);
+  --accent-foreground: var(--gs-black);
+
+  --destructive: #b3261e;
+  --destructive-foreground: var(--gs-white);
+
+  --border: var(--gs-gray-mid);
+  --input: var(--gs-gray-mid);
+  --ring: var(--gs-gold-dark);
+
+  --surface: var(--gs-white);
+  --sunken: var(--gs-gray-light);
+
+  --gold: var(--gs-gold-dark);
+  --gold-text: var(--gs-gold-dark-hover);
+  --gold-wash: var(--gs-gold-tint);
+
+  /* Estados funcionais (sucesso/alerta/erro/info) — só em indicadores pequenos */
+  --success: #2e7556;
+  --warning: #93620f;
+  --danger: #b3261e;
+  --info: #35679a;
+
+  --glass: rgb(255 255 255 / 0.85);
+  --grid-line: rgb(31 31 31 / 0.05);
+
+  --elev-xs: 0 1px 2px rgb(31 31 31 / 0.06);
+  --elev-sm: 0 1px 2px rgb(31 31 31 / 0.06), 0 1px 3px rgb(31 31 31 / 0.05);
+  --elev-md: 0 4px 12px rgb(31 31 31 / 0.08), 0 2px 4px rgb(31 31 31 / 0.04);
+  --elev-lg: 0 18px 48px rgb(31 31 31 / 0.12), 0 6px 14px rgb(31 31 31 / 0.06);
+  --elev-xl: 0 28px 70px rgb(31 31 31 / 0.18), 0 8px 20px rgb(31 31 31 / 0.08);
+
+  color-scheme: light;
+}
+
+/* ── Escuro: preto premium ────────────────────────────────────────── */
 .dark {
-  /* Group Studio Palette (Dark Mode) */
-  --background: #1f1f1f; /* Cinza Grafite */
-  --foreground: #fdfdfd; /* Branco Neve */
+  --background: var(--gs-black);
+  --foreground: var(--gs-white);
+  --card: #262626;
+  --card-foreground: var(--gs-white);
+  --popover: #2b2b2b;
+  --popover-foreground: var(--gs-white);
 
-  --card: #322e2b; /* Taupe Escuro */
-  --card-foreground: #fdfdfd;
+  --primary: var(--gs-gold-light);
+  --primary-hover: #e0bf8f;
+  --primary-foreground: var(--gs-black);
 
-  --popover: #322e2b;
-  --popover-foreground: #fdfdfd;
+  --secondary: #2f2f2f;
+  --secondary-foreground: var(--gs-white);
+  --muted: #2f2f2f;
+  --muted-foreground: #b3b3b3;
+  --faint: #8a8a8a;
+  --accent: rgb(255 255 255 / 0.06);
+  --accent-foreground: var(--gs-white);
 
-  --primary: #d5ae77; /* Duna (Brighter for dark mode) */
-  --primary-foreground: #322e2b;
+  --destructive: #e5534b;
+  --destructive-foreground: var(--gs-white);
 
-  --secondary: #322e2b;
-  --secondary-foreground: #fdfdfd;
+  --border: #3a3a3a;
+  --input: #454545;
+  --ring: var(--gs-gold-light);
 
-  --muted: #322e2b;
-  --muted-foreground: #cdcdcd; /* Cinza Neutro */
+  --surface: #2b2b2b;
+  --sunken: #191919;
 
-  --accent: #927245; /* Bronze Nobre */
-  --accent-foreground: #fdfdfd;
+  --gold: var(--gs-gold-light);
+  --gold-text: var(--gs-gold-light);
+  --gold-wash: rgb(213 174 119 / 0.12);
 
-  --destructive: #7f1d1d;
-  --destructive-foreground: #fdfdfd;
+  --success: #6cc79c;
+  --warning: #e7b25c;
+  --danger: #f28b82;
+  --info: #8ab4f8;
 
-  --border: #828384; /* Cinza Escuro */
-  --input: #828384;
-  --ring: #d5ae77;
+  --glass: rgb(31 31 31 / 0.85);
+  --grid-line: rgb(255 255 255 / 0.045);
 
-  /* Sidebar specific (Dark) */
-  --sidebar: #1f1f1f; /* Cinza Grafite */
-  --sidebar-foreground: #fdfdfd;
-  --sidebar-primary: #d5ae77;
-  --sidebar-primary-foreground: #322e2b;
-  --sidebar-accent: #322e2b; /* Taupe Escuro */
-  --sidebar-accent-foreground: #d5ae77;
-  --sidebar-border: #322e2b;
-  --sidebar-ring: #d5ae77;
+  --elev-xs: 0 1px 2px rgb(0 0 0 / 0.4);
+  --elev-sm: 0 1px 2px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.3);
+  --elev-md: 0 4px 12px rgb(0 0 0 / 0.4), 0 2px 4px rgb(0 0 0 / 0.25);
+  --elev-lg: 0 18px 48px rgb(0 0 0 / 0.55), 0 6px 14px rgb(0 0 0 / 0.3);
+  --elev-xl: 0 28px 70px rgb(0 0 0 / 0.65), 0 8px 20px rgb(0 0 0 / 0.35);
+
+  color-scheme: dark;
 }
 
-@keyframes shimmer {
-  from { background-position: 200% 0; }
-  to { background-position: -200% 0; }
+/* ── Utilitários da marca ─────────────────────────────────────────── */
+
+/* Superfície translúcida — o DS admite só no header fixo (branco a 85% + blur).
+   Atenção: backdrop-filter vira bloco de contenção de position:fixed — não usar
+   em ancestrais do embed do Power BI. */
+@utility glass {
+  background-color: var(--glass);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
 }
 
-/* Login page orb animations — substitui framer-motion no LoginGlow */
-@keyframes orb1-pulse {
-  0%, 100% { opacity: 0.4; transform: scale(0.88); }
-  50%       { opacity: 1;   transform: scale(1.1);  }
-}
-@keyframes orb2-pulse {
-  0%, 100% { opacity: 0.3;  transform: scale(1);    }
-  50%       { opacity: 0.85; transform: scale(1.18); }
-}
-@keyframes orb3-pulse {
-  0%, 100% { opacity: 0.2;  transform: scale(1);    }
-  50%       { opacity: 0.65; transform: scale(1.25); }
-}
-@keyframes orb4-pulse {
-  0%, 100% { opacity: 0.15; transform: scale(1);    }
-  50%       { opacity: 0.55; transform: scale(1.3);  }
+/* Grid hairline — a única textura permitida pelo DS. */
+@utility bg-grid {
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
 }
 
-@keyframes fade-in-up {
-  from { opacity: 0; transform: translateY(14px); }
-  to { opacity: 1; transform: translateY(0); }
+@utility scrollbar-none {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
-
-.animate-shimmer {
-  animation: shimmer 2s infinite linear;
+/* Faixas roláveis horizontais que somem nas bordas (máscara, não cor). */
+@utility fade-x {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 16px, #000 calc(100% - 16px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 16px, #000 calc(100% - 16px), transparent);
 }
 
-/* Embed Power BI — container do relatório em tela cheia (controlada pelo portal) */
+/* Sobrelinha do DS: Codec Pro Bold, caixa alta, entreletra 0.18em, dourado. */
+@utility eyebrow {
+  font-family: var(--font-sans);
+  font-size: 0.6875rem;
+  line-height: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+/* ── Keyframes ────────────────────────────────────────────────────── */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes indeterminate {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(310%);
+  }
+}
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.7);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* ── Base ─────────────────────────────────────────────────────────── */
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border);
+    outline-color: color-mix(in oklab, var(--ring) 55%, transparent);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: "Codec Pro", var(--font-hanken), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklab, var(--gs-gold-light) 40%, transparent);
+  }
+
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Ícones de linha com traço 1.75 — o padrão do DS. */
+  .lucide {
+    stroke-width: 1.75;
+  }
+
+  button,
+  [role="button"],
+  summary,
+  input[type="submit"],
+  input[type="reset"],
+  input[type="button"] {
+    cursor: pointer;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklab, var(--foreground) 18%, transparent);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
+}
+
+/* As telas de autenticação são sempre em preto premium: evita o flash claro
+   no overscroll do iOS e na barra do navegador. */
+html:has([data-auth-shell]),
+html:has([data-auth-shell]) body {
+  background-color: var(--gs-black);
+}
+
+/* Troca de tema: um fade curto, como virar a página. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 240ms;
+  animation-timing-function: var(--gs-ease-out);
+}
+
+/* ── Embed Power BI ───────────────────────────────────────────────── */
+
+/* Container do relatório em tela cheia (controlada pelo portal). */
 .pbi-shell:fullscreen {
   border-radius: 0;
   background-color: var(--background);
 }
 
-/* Embed Power BI — fallback de tela cheia (iOS Safari não tem Fullscreen API em
-   elemento). Qualquer ancestral com transform/filter viraria bloco de contenção
-   do position:fixed e prenderia o overlay dentro do card — o dashboard envolve o
-   embed num motion.div do framer-motion. O :has() alcança exatamente os
+/* Fallback de tela cheia (iOS Safari não tem Fullscreen API em elemento).
+   Qualquer ancestral com transform/filter/backdrop-filter viraria bloco de
+   contenção do position:fixed e prenderia o overlay dentro do card — o
+   dashboard envolve o embed em motion.div. O :has() alcança exatamente os
    ancestrais do embed, e só enquanto o fallback está ativo. */
 *:has(.pbi-shell-fs) {
   transform: none !important;
   filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  perspective: none !important;
+  contain: none !important;
+  will-change: auto !important;
 }
 
-/* Embed Power BI — scrollbar do palco, visível apenas com zoom acima de 100%.
-   É o único meio de pan: a roda do mouse é consumida pelo relatório. */
+/* Scrollbar do palco, visível apenas com zoom acima de 100%. É o único meio
+   de pan: a roda do mouse é consumida pelo relatório. */
 .pbi-stage {
   scrollbar-width: thin;
-  scrollbar-color: rgba(146, 114, 69, 0.55) transparent;
+  scrollbar-color: color-mix(in oklab, var(--gold) 60%, transparent) transparent;
 }
 .pbi-stage::-webkit-scrollbar {
   width: 10px;
@@ -174,51 +430,25 @@
   background: transparent;
 }
 .pbi-stage::-webkit-scrollbar-thumb {
-  background: rgba(146, 114, 69, 0.55);
+  background-color: color-mix(in oklab, var(--gold) 55%, transparent);
   border: 2px solid transparent;
   background-clip: content-box;
   border-radius: 9999px;
 }
 .pbi-stage::-webkit-scrollbar-thumb:hover {
-  background: rgba(146, 114, 69, 0.85);
-  background-clip: content-box;
-}
-.dark .pbi-stage {
-  scrollbar-color: rgba(213, 174, 119, 0.5) transparent;
-}
-.dark .pbi-stage::-webkit-scrollbar-thumb {
-  background: rgba(213, 174, 119, 0.5);
-  background-clip: content-box;
-}
-.dark .pbi-stage::-webkit-scrollbar-thumb:hover {
-  background: rgba(213, 174, 119, 0.8);
-  background-clip: content-box;
+  background-color: color-mix(in oklab, var(--gold) 85%, transparent);
 }
 
-.animate-fade-in-up {
-  animation: fade-in-up 0.4s ease-out both;
-}
+/* ── Acessibilidade e impressão ───────────────────────────────────── */
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-    font-family: var(--font-montserrat), sans-serif;
-    background-image:
-      radial-gradient(ellipse at 15% 80%, rgba(146, 114, 69, 0.07) 0%, transparent 55%),
-      radial-gradient(ellipse at 85% 15%, rgba(213, 174, 119, 0.05) 0%, transparent 50%);
-  }
-  .font-cinzel {
-    font-family: var(--font-cinzel), serif;
-  }
-  button,
-  [role="button"],
-  input[type="submit"],
-  input[type="reset"],
-  input[type="button"] {
-    @apply cursor-pointer;
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
 

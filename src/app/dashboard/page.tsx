@@ -6,6 +6,26 @@ import { DEPARTMENT_GROUPS } from '@/lib/constants'
 import { DepartmentView } from '@/components/department-view'
 import { CompanyOverview } from '@/components/company-overview'
 import { Dashboard } from '@/lib/types'
+import { PageHeader } from '@/components/ui/page-header'
+import { firstName } from '@/lib/user-display'
+
+export const metadata = { title: 'Dashboards' }
+
+const TIMEZONE = 'America/Sao_Paulo'
+
+/** Saudação e data calculadas no fuso de Brasília — o servidor roda em UTC. */
+function saudacao(agora: Date) {
+  const hora = Number(new Intl.DateTimeFormat('pt-BR', { hour: 'numeric', hourCycle: 'h23', timeZone: TIMEZONE }).format(agora))
+  if (hora < 12) return 'Bom dia'
+  if (hora < 18) return 'Boa tarde'
+  return 'Boa noite'
+}
+
+/** "quinta-feira, 24 de setembro" → "Quinta-feira, 24 de setembro" (só a inicial em maiúscula). */
+function dataPorExtenso(agora: Date) {
+  const texto = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TIMEZONE }).format(agora)
+  return texto.charAt(0).toUpperCase() + texto.slice(1)
+}
 
 // A página permanece dinâmica porque renderiza conteúdo específico do usuário autenticado.
 // Apenas a lista de dashboards (dado não sensível, igual para todos) é cacheada separadamente.
@@ -40,7 +60,7 @@ export default async function DashboardPage() {
   const [{ data: profile }, dbDashboards] = await Promise.all([
     supabase
       .from('profiles')
-      .select('department, allowed_sub_departments, is_admin, is_leader')
+      .select('department, allowed_sub_departments, is_admin, is_leader, full_name')
       .eq('id', user.id)
       .single(),
     getCachedDashboards(),
@@ -171,15 +191,42 @@ export default async function DashboardPage() {
       viewAllowedSubDepartments = Array.from(new Set([department, ...allowedSubDepartments]))
   }
 
-  return (
-    <div className="flex flex-col gap-4 h-full">
-      <div className="flex items-center justify-between animate-fade-in-up">
-        <h1 className="text-lg md:text-2xl font-sans font-bold tracking-tight text-foreground">
-          {isDiretoria ? 'Visão Geral' : `Dashboard — ${department}`}
-        </h1>
-      </div>
+  const agora = new Date()
+  const nome = firstName({ fullName: profile?.full_name, email: user.email })
+  const totalRelatorios = flatAccessibleDashboards.length
+  const totalAreas = Object.keys(dashboardConfig).length
 
-      <div className="flex-1 animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+  return (
+    <>
+      <PageHeader
+        eyebrow={isDiretoria ? 'Visão consolidada · Diretoria' : `Departamento · ${department}`}
+        title={
+          <>
+            {saudacao(agora)}, <span className="text-primary">{nome}</span>.
+          </>
+        }
+        description={
+          <p>
+            <span>{dataPorExtenso(agora)}</span>
+            <span aria-hidden className="mx-2 text-faint">·</span>
+            {totalRelatorios === 1 ? '1 relatório disponível para você' : `${totalRelatorios} relatórios disponíveis para você`}
+          </p>
+        }
+        actions={
+          <dl className="hidden items-stretch divide-x rounded-xl border bg-card shadow-xs md:flex">
+            <div className="space-y-1.5 px-6 py-3">
+              <dt className="eyebrow text-[10px] text-faint">Relatórios</dt>
+              <dd className="text-[1.75rem] font-extrabold leading-none tracking-[-0.02em] tabular-nums text-foreground">{totalRelatorios}</dd>
+            </div>
+            <div className="space-y-1.5 px-6 py-3">
+              <dt className="eyebrow text-[10px] text-faint">Áreas</dt>
+              <dd className="text-[1.75rem] font-extrabold leading-none tracking-[-0.02em] tabular-nums text-foreground">{totalAreas}</dd>
+            </div>
+          </dl>
+        }
+      />
+
+      <div className="flex-1 animate-rise [animation-delay:180ms]">
         {isDiretoria ? (
             <CompanyOverview dashboardConfig={dashboardConfig} isLeader={isLeader || isDiretoria} />
         ) : (
@@ -191,6 +238,6 @@ export default async function DashboardPage() {
           />
         )}
       </div>
-    </div>
+    </>
   )
 }

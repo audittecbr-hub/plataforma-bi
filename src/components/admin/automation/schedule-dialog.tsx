@@ -16,10 +16,13 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Plus, Pencil } from 'lucide-react'
+import { IconBadge } from '@/components/ui/icon-badge'
+import { CheckOption, FormSection, IconAction } from '@/components/admin/admin-ui'
+import { CalendarClock, LoaderCircle, Pencil, Plus } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { manageSchedule, type AutomationSchedule, type AutomationDefinition, type AutomationContact, type AutomationTemplate } from '@/app/actions/automation'
 import { toast } from "sonner"
+import { cn } from '@/lib/utils'
 
 interface ScheduleDialogProps {
   scheduleToEdit?: AutomationSchedule
@@ -29,21 +32,19 @@ interface ScheduleDialogProps {
 }
 
 const DAYS = [
-    { value: 0, label: 'Domingo' },
-    { value: 1, label: 'Segunda-feira' },
-    { value: 2, label: 'Terça-feira' },
-    { value: 3, label: 'Quarta-feira' },
-    { value: 4, label: 'Quinta-feira' },
-    { value: 5, label: 'Sexta-feira' },
-    { value: 6, label: 'Sábado' },
+    { value: 0, label: 'Domingo', short: 'Dom' },
+    { value: 1, label: 'Segunda-feira', short: 'Seg' },
+    { value: 2, label: 'Terça-feira', short: 'Ter' },
+    { value: 3, label: 'Quarta-feira', short: 'Qua' },
+    { value: 4, label: 'Quinta-feira', short: 'Qui' },
+    { value: 5, label: 'Sexta-feira', short: 'Sex' },
+    { value: 6, label: 'Sábado', short: 'Sáb' },
 ]
 
 export function ScheduleDialog({ scheduleToEdit, definitions, contacts, templates = [] }: ScheduleDialogProps) {
   const [open, setOpen] = useState(false)
   const isEditing = !!scheduleToEdit
   const router = useRouter()
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
   // Form State
@@ -85,7 +86,7 @@ export function ScheduleDialog({ scheduleToEdit, definitions, contacts, template
     if (value.length > 2) {
       value = `${value.slice(0, 2)}:${value.slice(2)}`;
     }
-    
+
     setDisplayTime(value);
 
     if (value.length === 5) {
@@ -107,7 +108,6 @@ export function ScheduleDialog({ scheduleToEdit, definitions, contacts, template
 
   async function handleSave() {
     setIsLoading(true)
-    setErrorMessage(null)
 
     const payload = {
         id: scheduleToEdit?.id,
@@ -136,128 +136,142 @@ export function ScheduleDialog({ scheduleToEdit, definitions, contacts, template
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
           {isEditing ? (
-             <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-                <span className="sr-only">Editar</span>
-                <Pencil className="h-4 w-4" />
-            </Button>
+            <IconAction label="Editar agendamento" icon={Pencil} />
           ) : (
-            <Button className="bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-primary-foreground">
-                <Plus className="mr-2 h-4 w-4" /> Nova Automação
+            <Button>
+                <Plus /> Nova automação
             </Button>
           )}
       </DialogTrigger>
-      <DialogContent className="w-[95vw] max-w-[600px] max-h-[90vh] overflow-y-auto bg-card text-foreground border-[#D5AE77]/20 rounded-lg">
-        <DialogHeader>
-          <DialogTitle className="text-[#D5AE77]">{isEditing ? 'Editar Agendamento' : 'Novo Agendamento'}</DialogTitle>
-          <DialogDescription className="text-muted-foreground">
-            Configure quando e para quem o relatório deve ser enviado.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid gap-2">
-            <Label htmlFor="sched-name" className="text-foreground">Nome da Automação</Label>
-            <Input 
-                id="sched-name" 
-                value={name} 
-                onChange={e => setName(e.target.value)} 
-                placeholder="Ex: Metas Matinal Diretoria"
-                className="bg-background border-input text-foreground" 
-            />
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogHeader className="flex-row items-start gap-4 space-y-0">
+          <IconBadge icon={CalendarClock} />
+          <div className="space-y-1.5">
+            <DialogTitle>{isEditing ? 'Editar agendamento' : 'Novo agendamento'}</DialogTitle>
+            <DialogDescription>
+              Configure quando e para quem o relatório deve ser enviado.
+            </DialogDescription>
           </div>
+        </DialogHeader>
 
-          <div className="flex gap-4">
-             <div className="grid gap-2 flex-1">
-                <Label className="text-foreground">Tipo de Relatório</Label>
-                <Select value={defId} onValueChange={setDefId}>
-                    <SelectTrigger className="bg-background border-input text-foreground">
-                        <SelectValue placeholder="Selecione..." />
+        <div className="grid gap-6">
+          <FormSection title="Relatório">
+            <div className="grid gap-2">
+              <Label htmlFor="sched-name">Nome da automação</Label>
+              <Input
+                  id="sched-name"
+                  value={name}
+                  onChange={e => setName(e.target.value)}
+                  placeholder="Ex.: Metas matinal Diretoria"
+              />
+            </div>
+
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-2">
+                  <Label htmlFor="sched-def">Tipo de relatório</Label>
+                  <Select value={defId} onValueChange={setDefId}>
+                      <SelectTrigger id="sched-def" className="w-full">
+                          <SelectValue placeholder="Selecione…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                          {definitions.map(d => (
+                              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                      </SelectContent>
+                  </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="sched-template">Template de mensagem</Label>
+                <Select value={templateId} onValueChange={setTemplateId}>
+                    <SelectTrigger id="sched-template" className="w-full">
+                        <SelectValue placeholder="Padrão do sistema" />
                     </SelectTrigger>
-                    <SelectContent className="bg-background border-border text-foreground">
-                        {definitions.map(d => (
-                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                    <SelectContent>
+                        <SelectItem value="default">Padrão da definição</SelectItem>
+                        {templates.map(t => (
+                            <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                         ))}
                     </SelectContent>
                 </Select>
+              </div>
             </div>
-            <div className="grid gap-2 w-[120px] shrink-0">
-                 <Label className="text-foreground">Horário</Label>
-                 <Input 
-                    placeholder="HH:MM"
-                    value={displayTime}
-                    onChange={handleTimeChange}
-                    maxLength={5}
-                    className="bg-background border-input text-foreground font-mono tracking-widest text-center text-sm"
-                 />
+            <p className="-mt-2 text-xs text-muted-foreground">Escolha &quot;Padrão&quot; para usar o template definido na rotina ou selecione um personalizado.</p>
+          </FormSection>
+
+          <FormSection title="Quando">
+            <div className="grid gap-4 sm:grid-cols-[140px_1fr] sm:items-end">
+              <div className="grid gap-2">
+                   <Label htmlFor="sched-time">Horário</Label>
+                   <Input
+                      id="sched-time"
+                      placeholder="HH:MM"
+                      value={displayTime}
+                      onChange={handleTimeChange}
+                      maxLength={5}
+                      inputMode="numeric"
+                      className="h-12 text-center text-lg font-extrabold tabular-nums tracking-[0.06em]"
+                   />
+              </div>
+              <div className="grid gap-2">
+                 <Label>Dias da semana</Label>
+                 <div className="flex flex-wrap gap-1.5">
+                    {DAYS.map(day => {
+                        const on = selectedDays.includes(day.value)
+                        return (
+                            <button
+                                key={day.value}
+                                type="button"
+                                onClick={() => handleDayToggle(day.value)}
+                                aria-pressed={on}
+                                aria-label={day.label}
+                                className={cn(
+                                    "h-12 min-w-12 flex-1 rounded-[4px] border px-2 text-[13px] font-semibold outline-none transition-colors duration-200",
+                                    "focus-visible:ring-[3px] focus-visible:ring-ring/25",
+                                    on
+                                      ? "border-ink bg-ink text-white dark:border-white dark:bg-white dark:text-ink"
+                                      : "bg-surface text-muted-foreground hover:border-foreground/30 hover:text-foreground"
+                                )}
+                            >
+                                {day.short}
+                            </button>
+                        )
+                    })}
+                 </div>
+              </div>
             </div>
-          </div>
+          </FormSection>
 
-          <div className="grid gap-2">
-            <Label className="text-foreground">Template de Mensagem</Label>
-            <Select value={templateId} onValueChange={setTemplateId}>
-                <SelectTrigger className="bg-background border-input text-foreground">
-                    <SelectValue placeholder="Padrão do Sistema" />
-                </SelectTrigger>
-                <SelectContent className="bg-background border-border text-foreground">
-                    <SelectItem value="default">Padrão da Definição</SelectItem>
-                    {templates.map(t => (
-                        <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
-                    ))}
-                </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">Escolha &quot;Padrão&quot; para usar o template definido na rotina ou selecione um personalizado.</p>
-          </div>
-
-          <div className="grid gap-2">
-             <Label className="text-foreground">Dias da Semana</Label>
-             <div className="flex flex-wrap gap-2">
-                {DAYS.map(day => (
-                    <div 
-                        key={day.value}
-                        onClick={() => handleDayToggle(day.value)}
-                        className={`
-                            cursor-pointer px-3 py-1 rounded-full text-xs border transition-colors
-                            ${selectedDays.includes(day.value) 
-                                ? 'bg-[#D5AE77] text-black border-[#D5AE77] font-semibold' 
-                                : 'bg-transparent text-muted-foreground border-input hover:border-foreground'}
-                        `}
-                    >
-                        {day.label.split('-')[0]}
-                    </div>
-                ))}
-             </div>
-          </div>
-
-          <div className="grid gap-2">
-            <Label className="text-foreground">Destinatários ({selectedContacts.length})</Label>
-            <div className="border border-input rounded-md p-3 max-h-[150px] overflow-y-auto bg-background grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <FormSection title={`Destinatários (${selectedContacts.length})`}>
+            <div className="grid max-h-[220px] grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
                 {contacts.map(c => (
-                     <div key={c.id} className="flex items-center space-x-2">
-                        <Checkbox 
-                            id={`contact-${c.id}`} 
+                     <CheckOption key={c.id} htmlFor={`contact-${c.id}`}>
+                        <Checkbox
+                            id={`contact-${c.id}`}
                             checked={selectedContacts.includes(c.id)}
                             onCheckedChange={() => handleContactToggle(c.id)}
                         />
-                        <Label htmlFor={`contact-${c.id}`} className="text-sm cursor-pointer text-muted-foreground truncate">
-                            {c.name}
-                        </Label>
-                     </div>
+                        <span className="truncate">{c.name}</span>
+                     </CheckOption>
                 ))}
-                {contacts.length === 0 && <p className="text-gray-500 text-sm">Nenhum contato disponível.</p>}
+                {contacts.length === 0 && <p className="text-sm text-muted-foreground">Nenhum contato disponível.</p>}
             </div>
-          </div>
+          </FormSection>
 
+          <label htmlFor="sched-active" className="flex cursor-pointer items-center justify-between gap-4 border-t pt-5">
+            <span className="space-y-0.5">
+              <span className="block text-[13px] font-semibold text-foreground">Agendamento ativo</span>
+              <span className="block text-xs text-muted-foreground">Desative para pausar os envios sem perder a configuração.</span>
+            </span>
+            <Switch id="sched-active" checked={isActive} onCheckedChange={setIsActive} />
+          </label>
 
-          
-          <div className="flex items-center space-x-2 py-2">
-            <Switch checked={isActive} onCheckedChange={setIsActive} />
-            <Label className="text-foreground">Agendamento Ativo</Label>
-          </div>
-
-
-          
           <DialogFooter>
-            <Button onClick={handleSave} className="bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-black font-bold" disabled={isLoading}>
-                {isLoading ? 'Salvando...' : 'Salvar'}
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSave} disabled={isLoading}>
+                {isLoading && <LoaderCircle className="animate-spin" />}
+                {isLoading ? 'Salvando…' : 'Salvar'}
             </Button>
           </DialogFooter>
         </div>

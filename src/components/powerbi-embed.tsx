@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
-import { Maximize2, Minimize2, Scan, ZoomIn, ZoomOut } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { Maximize2, Minimize2, Scan, ZoomIn, ZoomOut, type LucideIcon } from 'lucide-react'
+import { BrandSeal } from '@/components/brand/logo'
+import { Skeleton } from '@/components/ui/skeleton'
+import { Hint } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
 
 /**
@@ -42,9 +44,83 @@ interface PowerBIEmbedProps {
   src: string
   title?: string
   height?: string
+  /** Texto curto exibido na barra do visualizador (ex.: "Comercial · Metas"). */
+  caption?: string
 }
 
-export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" }: PowerBIEmbedProps) {
+function ToolbarButton({
+  icon: Icon,
+  label,
+  onClick,
+  disabled,
+  container,
+  className,
+}: {
+  icon: LucideIcon
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  container?: HTMLElement | null
+  className?: string
+}) {
+  return (
+    <Hint label={label} side="top" container={container}>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className={cn(
+          'grid size-8 place-items-center rounded-[4px] text-muted-foreground outline-none transition-colors',
+          'hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/25',
+          'disabled:pointer-events-none disabled:opacity-35',
+          className
+        )}
+      >
+        <Icon className="size-4" />
+      </button>
+    </Hint>
+  )
+}
+
+/** Esqueleto que imita a grade de um relatório enquanto o player carrega. */
+function ReportLoader({ caption }: { caption?: string }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col bg-card">
+      <div className="grid min-h-0 flex-1 grid-rows-[auto_auto_1fr] gap-3 p-4 sm:p-6">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-5 w-44" />
+          <Skeleton className="h-5 w-24" />
+        </div>
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <Skeleton key={i} className="h-16 rounded-xl sm:h-20" />
+          ))}
+        </div>
+        <div className="grid min-h-0 grid-cols-1 gap-3 md:grid-cols-3">
+          <Skeleton className="h-full min-h-24 rounded-xl md:col-span-2" />
+          <Skeleton className="hidden h-full rounded-xl md:block" />
+        </div>
+      </div>
+
+      <div className="pointer-events-none absolute inset-0 grid place-items-center p-6">
+        <div className="relative flex animate-rise flex-col items-center gap-4 rounded-xl border bg-card px-8 py-7 text-center shadow-lg">
+          <span aria-hidden className="absolute left-6 top-0 h-[3px] w-10 bg-gold" />
+          <BrandSeal size={40} />
+          <div className="space-y-1">
+            <p className="text-base font-bold tracking-[-0.01em] text-foreground">Preparando o relatório</p>
+            {caption && <p className="max-w-[16rem] truncate text-xs text-muted-foreground">{caption}</p>}
+          </div>
+          <div className="h-[3px] w-40 overflow-hidden bg-muted">
+            <div className="h-full w-1/3 animate-indeterminate bg-gold" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px", caption }: PowerBIEmbedProps) {
   const [loading, setLoading] = useState(true)
   const [isMobile, setIsMobile] = useState(false)
   const [isVisible, setIsVisible] = useState(false)
@@ -55,13 +131,21 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
   const [appliedIndex, setAppliedIndex] = useState(FIT_INDEX)
   const [isNativeFullscreen, setIsNativeFullscreen] = useState(false)
   const [isFallbackFullscreen, setIsFallbackFullscreen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
+  // O elemento da casca também vive em state: em tela cheia nativa só a casca
+  // é pintada, então os tooltips precisam ser portados para dentro dela.
+  const [shellEl, setShellEl] = useState<HTMLDivElement | null>(null)
+  const containerRef = useRef<HTMLDivElement | null>(null)
   const stageRef = useRef<HTMLDivElement>(null)
   const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const zoomTargetRef = useRef(FIT_INDEX)
 
   const isFullscreen = isNativeFullscreen || isFallbackFullscreen
   const zoom = ZOOM_STEPS[appliedIndex] / 100
+
+  const setShellRef = useCallback((el: HTMLDivElement | null) => {
+    containerRef.current = el
+    setShellEl(el)
+  }, [])
 
   // Track window size to determine if mobile
   useEffect(() => {
@@ -205,13 +289,14 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
   const isMinZoom = zoomIndex === 0
   const isMaxZoom = zoomIndex === ZOOM_STEPS.length - 1
   const isFitZoom = zoomIndex === FIT_INDEX
+  const tooltipContainer = isNativeFullscreen ? shellEl : undefined
 
   return (
     <div
-      ref={containerRef}
+      ref={setShellRef}
       className={cn(
-        "pbi-shell relative flex flex-col overflow-hidden rounded-lg bg-background/50",
-        isFallbackFullscreen && "pbi-shell-fs fixed inset-0 z-[60] rounded-none bg-background"
+        "pbi-shell relative flex flex-col overflow-hidden bg-sunken/50",
+        isFallbackFullscreen && "pbi-shell-fs fixed inset-0 z-[60] bg-background"
       )}
       // Em tela cheia o height precisa ser 100%: um valor fixo em style sobrepõe
       // o dimensionamento que o navegador aplica ao elemento em fullscreen.
@@ -227,13 +312,17 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
           // superior esquerdo. A centralização vale só aqui: com zoom acima de 1
           // o palco é rolável, e centrar por flex deixaria a borda esquerda do
           // canvas inalcançável pelo scroll.
-          zoom < 1 && "flex items-center justify-center"
+          zoom < 1 && "flex items-center justify-center bg-grid"
         )}
       >
         {/* Camada de zoom: cresce com o percentual e recorta o chrome nativo do player.
-            O overflow-hidden aqui é o que mantém os 61px extras fora da área rolável. */}
+            O overflow-hidden aqui é o que mantém os 61px extras fora da área rolável.
+            Abaixo de 100% o relatório vira uma "folha" flutuando sobre o palco. */}
         <div
-          className="relative overflow-hidden"
+          className={cn(
+            "relative overflow-hidden bg-card transition-[border-radius,box-shadow] duration-300",
+            zoom < 1 && "rounded-xl border shadow-lg"
+          )}
           style={{ width: `${zoom * 100}%`, height: `${zoom * 100}%` }}
         >
           {isVisible && (
@@ -243,7 +332,7 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
               src={finalSrc}
               onLoad={() => setLoading(false)}
               className={cn(
-                "absolute inset-0 w-full border-0 transition-opacity duration-300",
+                "absolute inset-0 w-full border-0 transition-opacity duration-500",
                 loading ? "opacity-0" : "opacity-100"
               )}
               style={{ height: `calc(100% + ${NATIVE_CHROME_PX}px)` }}
@@ -251,83 +340,41 @@ export function PowerBIEmbed({ src, title = "Power BI Report", height = "600px" 
           )}
         </div>
 
-        {loading && (
-          <div className="absolute inset-0 z-10 bg-card/30 backdrop-blur-[2px] p-5 flex flex-col gap-3">
-            {/* Header skeleton */}
-            <div className="flex items-center gap-3 mb-1">
-              <div className="h-5 w-36 rounded bg-gradient-to-r from-card via-primary/15 to-card bg-[length:200%_100%] animate-shimmer" />
-              <div className="h-5 w-24 rounded bg-gradient-to-r from-card via-primary/15 to-card bg-[length:200%_100%] animate-shimmer" style={{ animationDelay: '0.2s' }} />
-            </div>
-            {/* Content rows */}
-            {[...Array(4)].map((_, i) => (
-              <div
-                key={i}
-                className="flex-1 rounded-lg bg-gradient-to-r from-card via-primary/10 to-card bg-[length:200%_100%] animate-shimmer"
-                style={{ animationDelay: `${i * 0.12}s` }}
-              />
-            ))}
-            <p className="text-center text-xs text-muted-foreground/50 mt-1">Carregando relatório...</p>
-          </div>
-        )}
+        {loading && <ReportLoader caption={caption ?? title} />}
       </div>
 
       {/* Controles do portal — substituem a barra nativa do Power BI */}
-      <div className="flex h-10 shrink-0 items-center gap-1 border-t border-primary/20 bg-card/80 px-2 backdrop-blur-md">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-primary"
-          onClick={() => stepZoom(-1)}
-          disabled={isMinZoom}
-          aria-label="Reduzir zoom"
-          title="Reduzir zoom"
-        >
-          <ZoomOut className="h-4 w-4" />
-        </Button>
+      <div className="relative flex h-12 shrink-0 items-center gap-3 border-t bg-card px-2.5 sm:px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-2.5 pl-1" aria-live="polite">
+          <span className="relative flex size-2 shrink-0">
+            {!loading && <span className="absolute inset-0 animate-pulse-ring rounded-full bg-success" />}
+            <span className={cn("relative size-2 rounded-full transition-colors", loading ? "bg-warning" : "bg-success")} />
+          </span>
+          <span className="truncate text-xs text-muted-foreground">
+            {loading ? 'Conectando ao Power BI…' : (caption ?? title)}
+          </span>
+        </div>
 
-        <span
-          className="min-w-[3.5rem] text-center text-sm font-semibold tabular-nums text-primary"
-          aria-live="polite"
-        >
-          {zoomPercent}%
-        </span>
+        <div className="flex items-center gap-1 rounded-[4px] border bg-surface p-0.5">
+          <ToolbarButton icon={ZoomOut} label="Reduzir zoom" onClick={() => stepZoom(-1)} disabled={isMinZoom} container={tooltipContainer} />
+          <span
+            className="min-w-[3.25rem] select-none text-center text-xs font-bold tabular-nums text-foreground"
+            aria-live="polite"
+          >
+            {zoomPercent}%
+          </span>
+          <ToolbarButton icon={ZoomIn} label="Ampliar zoom" onClick={() => stepZoom(1)} disabled={isMaxZoom} container={tooltipContainer} />
+          <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+          <ToolbarButton icon={Scan} label="Ajustar à página" onClick={() => commitZoom(FIT_INDEX)} disabled={isFitZoom} container={tooltipContainer} />
+        </div>
 
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-primary"
-          onClick={() => stepZoom(1)}
-          disabled={isMaxZoom}
-          aria-label="Ampliar zoom"
-          title="Ampliar zoom"
-        >
-          <ZoomIn className="h-4 w-4" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-primary"
-          onClick={() => commitZoom(FIT_INDEX)}
-          disabled={isFitZoom}
-          aria-label="Ajustar à página"
-          title="Ajustar à página"
-        >
-          <Scan className="h-4 w-4" />
-        </Button>
-
-        <div className="flex-1" />
-
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7 text-muted-foreground hover:text-primary"
+        <ToolbarButton
+          icon={isFullscreen ? Minimize2 : Maximize2}
+          label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
           onClick={toggleFullscreen}
-          aria-label={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-          title={isFullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
-        >
-          {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-        </Button>
+          container={tooltipContainer}
+          className="size-9 border bg-surface"
+        />
       </div>
     </div>
   )

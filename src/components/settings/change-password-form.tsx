@@ -1,70 +1,45 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import { CircleAlert, CircleCheck, LoaderCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Loader2, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react'
+import { PasswordInput, PasswordStrengthMeter } from '@/components/ui/password-input'
 import { updatePassword } from '../../app/dashboard/settings/actions'
-
-function PasswordInput({ id, name, label, required = false, minLength }: { id: string, name: string, label: string, required?: boolean, minLength?: number }) {
-    const [show, setShow] = useState(false)
-    return (
-        <div className="space-y-2">
-            <Label htmlFor={id}>{label}</Label>
-            <div className="relative">
-                <Input 
-                    id={id} 
-                    name={name} 
-                    type={show ? "text" : "password"} 
-                    required={required}
-                    minLength={minLength}
-                    className="bg-background border-input pr-10"
-                />
-                <button 
-                    type="button" 
-                    onClick={() => setShow(!show)} 
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                >
-                    {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-            </div>
-        </div>
-    )
-}
+import { cn } from '@/lib/utils'
 
 export function ChangePasswordForm() {
     const [isLoading, setIsLoading] = useState(false)
     const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+    const [newPassword, setNewPassword] = useState('')
+    const formRef = useRef<HTMLFormElement>(null)
 
     async function handleSubmit(formData: FormData) {
         setIsLoading(true)
         setMessage(null)
 
         const oldPassword = formData.get('oldPassword') as string
-        const newPassword = formData.get('newPassword') as string
+        const newPasswordValue = formData.get('newPassword') as string
         const confirmPassword = formData.get('confirmPassword') as string
 
-        if (newPassword !== confirmPassword) {
+        if (newPasswordValue !== confirmPassword) {
             setMessage({ type: 'error', text: 'As novas senhas não coincidem.' })
             setIsLoading(false)
             return
         }
 
-        if (newPassword.length < 6) {
+        if (newPasswordValue.length < 6) {
              setMessage({ type: 'error', text: 'A nova senha deve ter pelo menos 6 caracteres.' })
              setIsLoading(false)
              return
         }
 
-        const result = await updatePassword(oldPassword, newPassword)
+        const result = await updatePassword(oldPassword, newPasswordValue)
 
         if (result.success) {
             setMessage({ type: 'success', text: 'Senha alterada com sucesso!' })
-            // Reset form manually or via key
-            const form = document.getElementById('change-password-form') as HTMLFormElement
-            form?.reset()
+            formRef.current?.reset()
+            setNewPassword('')
         } else {
             setMessage({ type: 'error', text: result.error || 'Erro ao alterar senha.' })
         }
@@ -73,31 +48,52 @@ export function ChangePasswordForm() {
     }
 
     return (
-        <Card className="border-none bg-card/50 mt-6">
-            <CardHeader>
-                <CardTitle>Segurança</CardTitle>
-                <CardDescription>
-                    Atualize sua senha de acesso.
-                </CardDescription>
-            </CardHeader>
-            <CardContent>
-                <form id="change-password-form" action={handleSubmit} className="space-y-4 max-w-md">
-                    {message && (
-                        <div className={`p-3 rounded-md flex items-center gap-2 text-sm ${message.type === 'success' ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
-                            {message.type === 'success' ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
-                            <span>{message.text}</span>
-                        </div>
-                    )}
+        <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <form ref={formRef} id="change-password-form" action={handleSubmit} className="grid max-w-md gap-5">
+                <div className="grid gap-2">
+                    <Label htmlFor="oldPassword">Senha atual</Label>
+                    <PasswordInput id="oldPassword" name="oldPassword" autoComplete="current-password" required />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="newPassword">Nova senha</Label>
+                    <PasswordInput
+                        id="newPassword"
+                        name="newPassword"
+                        autoComplete="new-password"
+                        required
+                        minLength={6}
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                    />
+                    <PasswordStrengthMeter value={newPassword} />
+                </div>
+                <div className="grid gap-2">
+                    <Label htmlFor="confirmPassword">Confirmar nova senha</Label>
+                    <PasswordInput id="confirmPassword" name="confirmPassword" autoComplete="new-password" required minLength={6} />
+                </div>
 
-                    <PasswordInput id="oldPassword" name="oldPassword" label="Senha Atual" required />
-                    <PasswordInput id="newPassword" name="newPassword" label="Nova Senha" required minLength={6} />
-                    <PasswordInput id="confirmPassword" name="confirmPassword" label="Confirmar Nova Senha" required minLength={6} />
+                {message && (
+                    <div
+                        role={message.type === 'error' ? 'alert' : 'status'}
+                        className={cn(
+                            'flex items-start gap-2.5 rounded-[4px] border px-3.5 py-3 text-sm',
+                            message.type === 'success'
+                                ? 'border-success/25 bg-success/[0.07] text-success'
+                                : 'border-danger/25 bg-danger/[0.07] text-danger'
+                        )}
+                    >
+                        {message.type === 'success' ? <CircleCheck className="mt-0.5 size-4 shrink-0" /> : <CircleAlert className="mt-0.5 size-4 shrink-0" />}
+                        <span>{message.text}</span>
+                    </div>
+                )}
 
-                    <Button type="submit" className="w-full bg-[#D5AE77] hover:bg-[#D5AE77]/90 text-black font-bold" disabled={isLoading}>
-                        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : 'Alterar Senha'}
+                <div>
+                    <Button type="submit" disabled={isLoading}>
+                        {isLoading && <LoaderCircle className="animate-spin" />}
+                        {isLoading ? 'Alterando…' : 'Alterar senha'}
                     </Button>
-                </form>
-            </CardContent>
-        </Card>
+                </div>
+            </form>
+        </div>
     )
 }
