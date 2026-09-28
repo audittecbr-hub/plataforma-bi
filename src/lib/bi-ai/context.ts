@@ -11,6 +11,11 @@ function words(value: string): string[] {
 
 function questionTerms(manifest: BiManifest, question: string): Set<string> {
   const terms = new Set(words(question))
+  // Cadences such as "mensal" should select the corresponding time field.
+  const normalizedQuestion = normalizeTerm(question)
+  if (/\b(?:mensal|mensais)\b/.test(normalizedQuestion)) terms.add('mes')
+  if (/\b(?:anual|anuais)\b/.test(normalizedQuestion)) terms.add('ano')
+  if (/\b(?:trimestral|trimestrais)\b/.test(normalizedQuestion)) terms.add('trimestre')
   const synonyms = asRecord(manifest.business.synonyms)
   for (const [canonical, aliases] of Object.entries(synonyms)) {
     const group = [canonical, ...(Array.isArray(aliases) ? aliases.filter((x): x is string => typeof x === 'string') : [])]
@@ -81,7 +86,7 @@ export function selectContext(manifest: BiManifest, question: string, isAdmin: b
   }
   const model = asRecord(manifest.raw.model)
   const timeFields = Array.isArray(model.timeFields) ? model.timeFields : []
-  if (/ano|mes|mês|data|per[ií]odo|anterior|atual|ytd|acumulad|\b20\d{2}\b/i.test(question)) {
+  if (/ano|mes|mês|mensal|mensais|trimestral|trimestrais|anual|anuais|data|per[ií]odo|anterior|atual|ytd|acumulad|\b20\d{2}\b/i.test(question)) {
     for (const field of timeFields) {
       if (columns.length >= 30) break
       const exact = String(field).toLowerCase()

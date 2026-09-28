@@ -86,6 +86,25 @@ test('context selects business synonyms and excludes protected objects', () => {
   assert(!context.tables.some((table) => table.name === 'Tecnica'))
 })
 
+test('monthly wording supplies an authorized month dimension for DAX planning', () => {
+  const monthly = parseManifest({ ...raw, model: { ...raw.model,
+    tables: [...raw.model.tables, { name: 'Calendario', columns: [
+      { name: 'Ano' }, { name: 'MesAno', synonyms: ['mês'] },
+    ] }],
+    measures: [...raw.model.measures, { name: 'Resultado Realizado', table: 'Fato',
+      preferredMeasure: true, synonyms: ['resultado'] }],
+    timeFields: ['Calendario[Ano]', 'Calendario[MesAno]'],
+  } })
+  const monthlyContext = selectContext(monthly, 'qual resultado mensal?', false)
+  assert(monthlyContext.columns.some((column) => column.table === 'Calendario' && column.name === 'MesAno'))
+  assert(selectContext(monthly, 'quais foram os resultados mensais?', false).columns
+    .some((column) => column.table === 'Calendario' && column.name === 'MesAno'))
+  assert.doesNotThrow(() => validateDax(
+    'EVALUATE TOPN(12, SUMMARIZECOLUMNS(Calendario[MesAno], "Resultado", [Resultado Realizado]), [Resultado Realizado], DESC)',
+    monthlyContext, monthly, 100,
+  ))
+})
+
 test('DAX guard accepts an official measure and bounded dimension grouping', () => {
   const valid = `EVALUATE TOPN(50, SUMMARIZECOLUMNS('Dim'[Unidade], "Receita", [Receita Líquida]), [Receita Líquida], DESC)`
   assert.deepEqual(validateDax(valid, context, manifest, 100).measures, ['Receita Líquida'])
