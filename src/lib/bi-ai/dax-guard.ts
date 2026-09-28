@@ -55,6 +55,12 @@ export function validateDax(
 
   const usedMeasures = new Set<string>()
   const usedColumns = new Set<string>()
+  const aliases = new Set<string>()
+  if (shape === 'TOPN') {
+    for (const match of compact.matchAll(/"((?:[^"]|"")+?)"\s*,\s*(?:CALCULATE\s*\(\s*)?\[([^\]]+)\]/gi)) {
+      if (findByName(context.measures, match[2])) aliases.add(match[1].replace(/""/g, ''))
+    }
+  }
   // Strings are labels and filter values; they cannot introduce model identifiers.
   let rest = compact.replace(/"(?:[^"]|"")*"/g, ' ')
   rest = rest.replace(/(?:'((?:[^']|'')+)'|([A-Za-z_][A-Za-z0-9_]*))\s*\[([^\]]+)\]/g,
@@ -86,6 +92,7 @@ export function validateDax(
     })
   rest = rest.replace(/\[([^\]]+)\]/g, (_full, name: string) => {
     const measure = findByName(context.measures, name)
+    if (!measure && aliases.has(name)) return ' '
     if (!measure || !measure.queryable || (measure.restricted && !context.allowRestricted) || measure.presentationOnly) {
       throw new DaxGuardError(`Medida fora do contexto autorizado: [${name}].`)
     }

@@ -15,6 +15,11 @@ export interface BiObject {
   semanticRole?: string
   aggregatable: boolean
   dependencies: string[]
+  intent?: string
+  whenToUse?: string
+  whenNotToUse?: string
+  expectedDimensions: string[]
+  publishedExpression?: string
   format?: string
   dataType?: string
 }
@@ -124,6 +129,10 @@ function normalObject(source: Record<string, unknown>, table?: string): BiObject
     semanticRole: safeText(source.semanticRole, 40) || undefined,
     aggregatable: source.aggregatable === true || source.aggregationAllowed === true,
     dependencies: strings(valueOf(source, 'dependencies', 'dependsOn'), 30),
+    intent: safeText(source.intent, 250) || undefined,
+    whenToUse: safeText(source.whenToUse, 300) || undefined,
+    whenNotToUse: safeText(source.whenNotToUse, 300) || undefined,
+    expectedDimensions: strings(source.expectedDimensions, 30),
     format: safeText(valueOf(source, 'format', 'formatString'), 80) || undefined,
     dataType: safeText(valueOf(source, 'dataType', 'type'), 40) || undefined,
   }

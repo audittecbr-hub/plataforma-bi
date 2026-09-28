@@ -16,6 +16,56 @@ não lê slicers do iframe Publish to web: filtros devem estar na pergunta.
 O Power BI é a fonte dos números. O Supabase guarda manifesto, mensagens e
 metadados de consultas; não replica fatos nem persiste linhas de resultados.
 
+### Escopo semântico e consultas certificadas
+
+O manifesto pode declarar `certifiedQueries`: receitas de consulta tipadas para
+perguntas cujo escopo de negócio precisa ser exato. Cada receita informa termos
+de ativação, medida oficial ou soma de coluna numérica revisada, filtro de
+dimensão, campo de ano e, quando necessário, um cálculo derivado. O servidor
+confere todos esses objetos no manifesto e compila DAX agregado; não aceita
+DAX livre vindo do navegador. A resposta dessas receitas é formatada a partir
+das células retornadas pelo Power BI, sem nova geração numérica pela IA.
+
+No BI Operações, há receitas para resultado mensal, composição OP/Marca/Repasse/
+Outros, Fundo de Marketing e provisão por operação. A receita de Fundo separa a provisão gerencial
+descontada das operações do resultado próprio do departamento, calculado como
+receita própria mais despesa própria já negativa. O resultado geral das seis
+operações não é usado como substituto. A consulta por operação exclui a linha
+em branco da dimensão para preservar as seis operações. Se um recorte nomeado ainda não tiver
+consulta validada, o Chat informa a limitação.
+
+Perguntas comuns podem ter também `queryExamples` com DAX revisado. Quando a
+pergunta corresponde exatamente a um exemplo, o servidor valida e executa esse
+DAX. Nas demais perguntas, o planejador recebe nomes do catálogo completo,
+detalhes dos objetos relevantes e regras de negócio; só pode usar medidas e
+dimensões autorizadas e a consulta passa pela guarda DAX antes de executar.
+O manifesto preserva `whenToUse` e `whenNotToUse` das medidas para distinguir
+um componente de uma métrica do próprio assunto perguntado.
+
+O Portal usa a identidade de serviço já autorizada no workspace. Para cada
+dashboard, busca a [definição pública do modelo semântico](https://learn.microsoft.com/en-us/rest/api/fabric/semanticmodel/items/get-semantic-model-definition)
+e do [relatório](https://learn.microsoft.com/en-us/rest/api/fabric/report/items/get-report-definition)
+diretamente no Fabric, com cache de 10 minutos por processo. A integração foi
+verificada com Operações: 14 tabelas, 37 medidas, 89 colunas, seis relações,
+sete páginas e 75 visuais no modelo publicado. O servidor extrai nomes,
+relações, fórmulas DAX curtas e referências dos visuais; não envia partições,
+M queries, strings de conexão ou recursos do relatório ao modelo de IA. Os
+objetos autorizados continuam definidos pelo manifesto para preservar as
+restrições de acesso. Se o modelo publicado perder uma medida ou coluna usada
+no contexto, o Chat recusa a resposta. No registro, o Portal grava no
+manifesto o hash da definição publicada; se o modelo mudar depois, o Chat
+interrompe respostas até uma nova verificação e registro. A leitura da definição
+exige que a identidade de serviço tenha permissão de leitura **e escrita** no
+item segundo a API do Fabric; nenhuma rota do Chat altera o modelo.
+
+Os números vêm do Power BI REST Execute Queries sobre esse mesmo modelo
+publicado. O [Fabric IQ MCP](https://learn.microsoft.com/en-us/fabric/iq/connectors/fabric-iq-mcp)
+também oferece ferramentas de esquema, busca de valores e DAX, mas exige OAuth
+delegado de cada usuário e não aceita service principal; ele não pode usar a
+sessão Microsoft pessoal do administrador para todos os usuários do Portal.
+Esta arquitetura fornece leitura direta do projeto no workspace com a conta de
+serviço, sem depender de login Microsoft por usuário.
+
 ## Instalação
 
 1. Aplique `supabase/migrations/20260928_bi_ai_context.sql` no SQL Editor do

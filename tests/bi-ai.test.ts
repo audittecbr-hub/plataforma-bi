@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseManifest, parseLinkedManifest, manifestHash, ManifestLinkError } from '../src/lib/bi-ai/manifest'
-import { selectContext } from '../src/lib/bi-ai/context'
+import { expandContextFromPlan, selectContext } from '../src/lib/bi-ai/context'
 import { validateDax } from '../src/lib/bi-ai/dax-guard'
 import { answerIsGrounded, parsePlan, trimResults } from '../src/lib/bi-ai/plan'
 import { conversationBelongsToDashboard, dashboardAccessDecision, montarContextoUsuario, podeAcessarDashboard } from '../src/lib/permissions'
@@ -9,6 +9,8 @@ import { validRegistrationSecret } from '../src/lib/bi-ai/registration-secret'
 import { executeDaxQuery, PowerBiQueryError, powerBiUserMessage } from '../src/lib/powerbi'
 import { decryptApiKey, encryptApiKey, parseEncryptionKey } from '../src/lib/ai-key-crypto'
 import { modelProtocol, modelSupportedByAdapter, reasoningOptions } from '../src/lib/ai-reasoning'
+import { certifiedPlan, certifiedScopeMessage, validateCertifiedQueries } from '../src/lib/bi-ai/certified'
+import { assertPublishedCatalog, parsePublishedSchema } from '../src/lib/bi-ai/fabric-schema'
 
 const raw = {
   schemaVersion: '1.0',
@@ -105,9 +107,54 @@ test('monthly wording supplies an authorized month dimension for DAX planning', 
   ))
 })
 
+test('certified recipes compile scoped aggregate DAX and refuse uncovered entity questions', () => {
+  const recipe = {
+    id: 'unit-a', kind: 'row', subject: 'Unidade A', format: 'currency', yearField: 'Calendario[Ano]',
+    match: { phrases: ['Unidade A'], anyWords: ['receita'], excludePhrases: ['mensal'] },
+    metrics: [{ key: 'receita', label: 'Receita da unidade', sum: 'Fato[Valor]',
+      filter: { field: 'Dim[Unidade]', equals: 'A' } }],
+  }
+  const withRecipe = parseManifest({ ...raw,
+    model: { ...raw.model, tables: [
+      { name: 'Dim', columns: [{ name: 'Unidade', synonyms: ['Filial'] }] },
+      { name: 'Fato', kind: 'fact', columns: [{ name: 'Valor', queryable: true, aggregatable: true }] },
+      { name: 'Calendario', columns: [{ name: 'Ano', semanticRole: 'time' }] },
+    ] },
+    certifiedQueries: [recipe],
+  })
+  assert.doesNotThrow(() => validateCertifiedQueries(withRecipe))
+  const plan = certifiedPlan(withRecipe, 'Qual a receita da Unidade A em 2026?')!
+  assert.match(plan.dax, /SUM\('Fato'\[Valor\]\)/)
+  assert.match(plan.dax, /'Dim'\[Unidade\] = "A"/)
+  assert.match(plan.dax, /'Calendario'\[Ano\] = 2026/)
+  assert.match(plan.answer([{ '[Receita da unidade]': 1234.56 }]), /1\.234,56/)
+  assert.match(certifiedScopeMessage(withRecipe, 'Qual a receita mensal da Unidade A?') ?? '', /não tem uma consulta validada/)
+  assert.equal(certifiedPlan(withRecipe, 'Qual a receita da Unidade A em janeiro de 2026?'), null)
+  assert.match(certifiedScopeMessage(withRecipe, 'Qual a receita da Unidade A em janeiro de 2026?') ?? '', /não tem uma consulta validada/)
+  const invalid = parseManifest({ ...withRecipe.raw, model: { ...raw.model,
+    tables: [
+      { name: 'Dim', columns: [{ name: 'Unidade' }] },
+      { name: 'Fato', kind: 'fact', columns: [{ name: 'Valor', queryable: true, aggregatable: false }] },
+      { name: 'Calendario', columns: [{ name: 'Ano', semanticRole: 'time' }] },
+    ] } })
+  assert.throws(() => validateCertifiedQueries(invalid), /não autorizado/)
+  const withGrouping = parseManifest({ ...withRecipe.raw, certifiedQueries: [recipe, {
+    id: 'by-unit', kind: 'grouped', subject: 'Receita por unidade', format: 'currency',
+    yearField: 'Calendario[Ano]', groupField: 'Dim[Unidade]', maxRows: 10,
+    match: { allWords: ['receita', 'unidade'] },
+    metrics: [{ key: 'receita', label: 'Receita', measure: 'Receita Líquida' }],
+  }] })
+  const grouped = certifiedPlan(withGrouping, 'Receita por unidade em 2026?')!
+  assert.match(grouped.dax, /NOT ISBLANK\('Dim'\[Unidade\]\)/)
+})
+
 test('DAX guard accepts an official measure and bounded dimension grouping', () => {
   const valid = `EVALUATE TOPN(50, SUMMARIZECOLUMNS('Dim'[Unidade], "Receita", [Receita Líquida]), [Receita Líquida], DESC)`
   assert.deepEqual(validateDax(valid, context, manifest, 100).measures, ['Receita Líquida'])
+  assert.doesNotThrow(() => validateDax(
+    'EVALUATE TOPN(10, SUMMARIZECOLUMNS(Dim[Unidade], "Receita", CALCULATE([Receita Líquida])), [Receita], DESC)',
+    context, manifest, 100,
+  ))
   assert.throws(() => validateDax('EVALUATE ROW("X", [Inexistente])', context, manifest, 100), /fora do contexto/)
   assert.throws(() => validateDax('EVALUATE ROW("X", [Painel HTML])', context, manifest, 100), /fora do contexto/)
   assert.throws(() => validateDax(`EVALUATE TOPN(10, SUMMARIZECOLUMNS('Clientes'[CNPJ], "X", [Receita Líquida]))`, context, manifest, 100), /fora do contexto/)
@@ -115,6 +162,38 @@ test('DAX guard accepts an official measure and bounded dimension grouping', () 
   assert.throws(() => validateDax('EVALUATE ROW("X", [Receita Líquida] + 1000000)', context, manifest, 100), /Aritmética/)
   assert.throws(() => validateDax(`EVALUATE TOPN(1000, SUMMARIZECOLUMNS('Dim'[Unidade], "X", [Receita Líquida]))`, context, manifest, 100), /TOPN/)
   assert.throws(() => validateDax(`EVALUATE TOPN(10, SUMMARIZECOLUMNS('Fato'[Valor], "X", [Receita Líquida]))`, context, manifest, 100), /factual/)
+})
+
+test('a plan can inspect another authorized manifest object without granting restricted fields', () => {
+  const narrow = { ...context, measures: [], columns: [] }
+  const expanded = expandContextFromPlan(narrow, manifest,
+    'EVALUATE TOPN(10, SUMMARIZECOLUMNS(Dim[Unidade], "Receita", [Receita Líquida]))')
+  assert(expanded.measures.some((measure) => measure.name === 'Receita Líquida'))
+  assert(expanded.columns.some((column) => column.table === 'Dim' && column.name === 'Unidade'))
+  assert(!expanded.columns.some((column) => column.name === 'CNPJ'))
+})
+
+test('Fabric definition parser keeps model and report schema without source connections', () => {
+  const part = (path: string, contents: string) => ({ path, payloadType: 'InlineBase64',
+    payload: Buffer.from(contents).toString('base64') })
+  const schema = parsePublishedSchema([
+    part('definition/tables/Fato.tmdl', `table Fato\n\tcolumn Valor\n\tmeasure 'Receita Líquida' = SUM(Fato[Valor])\n\tpartition Fato = m\n\t\tsource = Sql.Database("private-server", "db")`),
+    part('definition/relationships.tmdl', 'relationship r1\n\tfromColumn: Fato.Valor\n\ttoColumn: Dim.Unidade'),
+  ], [
+    part('definition/pages/page1/page.json', JSON.stringify({ displayName: 'Resumo' })),
+    part('definition/pages/page1/visuals/v1/visual.json', JSON.stringify({ visual: { visualType: 'card' } })),
+  ])
+  assert.equal(schema.measures[0].name, 'Receita Líquida')
+  assert.equal(schema.measures[0].expression, 'SUM(Fato[Valor])')
+  assert.equal(schema.columns[0].name, 'Valor')
+  assert.deepEqual(schema.pages, ['Resumo'])
+  assert.equal(schema.visualCount, 1)
+  assert(!JSON.stringify(schema).includes('private-server'))
+  const stale = parseManifest({ ...raw, source: { ...raw.source, publishedModelHash: 'old-version' },
+    model: { tables: [{ name: 'Fato', columns: [{ name: 'Valor' }] }],
+      measures: [{ name: 'Receita Líquida', table: 'Fato' }] } })
+  assert.throws(() => assertPublishedCatalog(stale, schema), /mudou/)
+  assert.doesNotThrow(() => assertPublishedCatalog(stale, schema, false))
 })
 
 test('planner caps queries and refuses unanswerable questions without DAX', () => {

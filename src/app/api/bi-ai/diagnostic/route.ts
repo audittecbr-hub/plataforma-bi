@@ -1,6 +1,7 @@
 import { apiError, authorizedDashboard, BiAiError } from '@/lib/bi-ai/access'
 import { executeDaxQuery, listWorkspaceDatasets, PowerBiQueryError, powerBiUserMessage } from '@/lib/powerbi'
 import { manifestForDashboard } from '@/lib/bi-ai/registry'
+import { publishedSchema } from '@/lib/bi-ai/fabric-context'
 
 export const runtime = 'nodejs'
 
@@ -34,8 +35,20 @@ export async function GET(request: Request): Promise<Response> {
         semanticModelId: manifest.semanticModelId,
         dax: 'EVALUATE ROW("ok", 1)',
       })
-      return Response.json({ ok: rows.length === 1, code: 'POWERBI_READY',
-        detail: 'Consulta mínima executada no modelo semântico.' })
+      if (rows.length !== 1) throw new BiAiError(502, 'POWERBI_ERROR', 'A consulta mínima não retornou a linha esperada.')
+      try {
+        const schema = await publishedSchema(manifest.workspaceId, manifest.semanticModelId, manifest.reportId)
+        return Response.json({ ok: true, code: 'FABRIC_READY',
+          detail: `Consulta DAX e definição publicada confirmadas: ${new Set(schema.columns.map((item) => item.table)).size} tabelas, ${schema.measures.length} medidas, ${schema.columns.length} colunas, ${schema.pages.length} páginas e ${schema.visualCount} visuais.`,
+          schema: { modelHash: schema.modelHash, measures: schema.measures.length,
+            columns: schema.columns.length, pages: schema.pages.length, visuals: schema.visualCount } })
+      } catch (error) {
+        console.error('[bi-ai] diagnostic Fabric schema:', error instanceof Error ? error.message : error)
+        return Response.json({ ok: manifest.capabilities.liveDefinitionRequired !== true,
+          code: 'FABRIC_DEFINITION_UNAVAILABLE',
+          detail: 'A consulta DAX funcionou, mas a definição publicada do Fabric não pôde ser lida.' },
+        { status: manifest.capabilities.liveDefinitionRequired === true ? 503 : 200 })
+      }
     } catch (error) {
       if (error instanceof PowerBiQueryError) {
         const code = workspaceVisible && error.code === 'WORKSPACE_ACCESS' ? 'BUILD_READ' : error.code

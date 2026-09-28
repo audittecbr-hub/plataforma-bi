@@ -49,7 +49,12 @@ function selected<T extends { name: string; description?: string; synonyms?: str
 }
 
 export interface SelectedContext {
+  source?: string
+  publishedVisuals?: string[]
   business: string
+  businessRules: string[]
+  availableMeasures: string[]
+  availableDimensions: string[]
   tables: Pick<BiTable, 'name' | 'description' | 'fact'>[]
   measures: BiObject[]
   columns: BiObject[]
@@ -133,8 +138,15 @@ export function selectContext(manifest: BiManifest, question: string, isAdmin: b
     example, score: scoreObject({ name: example.question }, terms),
   })).sort((a, b) => b.score - a.score).filter((item) => item.score > 0).slice(0, 3)
     .map((item) => item.example)
+  const businessRules = (Array.isArray(manifest.business.rules) ? manifest.business.rules : [])
+    .map((value) => safeText(asRecord(value).description, 280))
+    .filter((rule) => rule && scoreObject({ name: rule }, terms) > 0).slice(0, 8)
   const context: SelectedContext = {
     business: safeText(manifest.business.description ?? manifest.business.summary ?? manifest.business.domain, 900),
+    businessRules,
+    availableMeasures: manifest.measures.filter((measure) => measure.queryable && !measure.restricted && !measure.presentationOnly)
+      .map((measure) => measure.name).slice(0, 200),
+    availableDimensions: allColumns.map((column) => `${column.table}[${column.name}]`).slice(0, 200),
     tables: tables.map(({ name, description, fact }) => ({ name, description, fact })),
     measures,
     columns,
@@ -150,10 +162,43 @@ export function selectContext(manifest: BiManifest, question: string, isAdmin: b
     catch { return false }
   })
   while (JSON.stringify(context).length > 18_000) {
-    if (context.columns.length > 2) context.columns.pop()
-    else if (context.measures.length > 2) context.measures.pop()
+    if (context.availableDimensions.length) context.availableDimensions.pop()
+    else if (context.availableMeasures.length) context.availableMeasures.pop()
+    else if (context.businessRules.length) context.businessRules.pop()
     else if (context.examples.length) context.examples.pop()
+    else if (context.columns.length > 2) context.columns.pop()
+    else if (context.measures.length > 2) context.measures.pop()
     else break
   }
   return context
+}
+
+/** Resolve exact names discovered from the compact catalog without another model call. */
+export function expandContextFromPlan(context: SelectedContext, manifest: BiManifest, draft: string): SelectedContext {
+  const text = draft.toLocaleLowerCase('pt-BR')
+  const measures = [...context.measures]
+  const columns = [...context.columns]
+  const tables = [...context.tables]
+  for (const measure of manifest.measures) {
+    if (measures.length >= context.measures.length + 8) break
+    if (!measure.queryable || measure.presentationOnly || (measure.restricted && !context.allowRestricted)
+      || measures.includes(measure) || !text.includes(`[${measure.name.toLocaleLowerCase('pt-BR')}]`)) continue
+    measures.push(measure)
+    const table = manifest.tables.find((item) => item.name === measure.table)
+    if (table?.queryable && !tables.some((item) => item.name === table.name)) tables.push(table)
+  }
+  for (const table of manifest.tables.filter((item) => item.queryable)) {
+    for (const column of table.columns) {
+      if (columns.length >= context.columns.length + 8) break
+      if (!column.queryable || column.presentationOnly || (column.restricted && !context.allowRestricted)
+        || columns.includes(column)) continue
+      const ref = `${table.name}[${column.name}]`.toLocaleLowerCase('pt-BR')
+      const quoted = `'${table.name}'[${column.name}]`.toLocaleLowerCase('pt-BR')
+      if (!text.includes(ref) && !text.includes(quoted)) continue
+      columns.push(column)
+      if (!tables.some((item) => item.name === table.name)) tables.push(table)
+    }
+  }
+  return measures.length === context.measures.length && columns.length === context.columns.length
+    ? context : { ...context, measures, columns, tables }
 }

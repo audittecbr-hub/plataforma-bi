@@ -62,13 +62,14 @@ export interface RefreshHistoryItem {
 
 // Cache de token em memória para evitar chamadas redundantes ao Azure AD
 // O token tem validade de 3600s — reutilizado entre requisições do mesmo processo
-let _tokenCache: { value: string; expiresAt: number } | null = null
+const _tokenCache = new Map<string, { value: string; expiresAt: number }>()
 
 /** Obtém o Bearer Token do Azure AD via client_credentials flow (com cache de 1h) */
-async function getAccessToken(): Promise<string> {
+async function getAccessToken(scope = 'https://analysis.windows.net/powerbi/api/.default'): Promise<string> {
     // Retorna o token cacheado se ainda estiver válido
-    if (_tokenCache && Date.now() < _tokenCache.expiresAt) {
-        return _tokenCache.value
+    const cached = _tokenCache.get(scope)
+    if (cached && Date.now() < cached.expiresAt) {
+        return cached.value
     }
 
     const tenant = process.env.POWERBI_TENANT
@@ -85,7 +86,7 @@ async function getAccessToken(): Promise<string> {
         grant_type: 'client_credentials',
         client_id: clientId,
         client_secret: clientSecret,
-        scope: 'https://analysis.windows.net/powerbi/api/.default',
+        scope,
     })
 
     const response = await fetch(tokenUrl, {
@@ -103,11 +104,17 @@ async function getAccessToken(): Promise<string> {
     const data = await response.json()
 
     // Armazena o token em cache com a expiração real (com margem de 60s de segurança)
-    _tokenCache = {
+    const entry = {
         value: data.access_token as string,
         expiresAt: Date.now() + ((data.expires_in as number ?? 3600) - 60) * 1000,
     }
-    return _tokenCache.value
+    _tokenCache.set(scope, entry)
+    return entry.value
+}
+
+/** The same service identity can request Fabric metadata with its own audience. */
+export function getFabricAccessToken(): Promise<string> {
+    return getAccessToken('https://api.fabric.microsoft.com/.default')
 }
 
 export type PowerBiErrorCode = 'ENTRA_MISSING' | 'ENTRA_TOKEN' | 'WORKSPACE_ACCESS'

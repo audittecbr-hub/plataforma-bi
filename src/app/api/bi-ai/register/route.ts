@@ -1,6 +1,9 @@
 import { apiError, BiAiError } from '@/lib/bi-ai/access'
 import { asRecord, ManifestError, parseManifest, UUID } from '@/lib/bi-ai/manifest'
 import { registerManifest } from '@/lib/bi-ai/registry'
+import { CertifiedQueryError, validateCertifiedQueries } from '@/lib/bi-ai/certified'
+import { publishedSchema } from '@/lib/bi-ai/fabric-context'
+import { assertPublishedCatalog, PublishedSchemaError } from '@/lib/bi-ai/fabric-schema'
 import { validRegistrationSecret } from '@/lib/bi-ai/registration-secret'
 
 export const runtime = 'nodejs'
@@ -50,13 +53,31 @@ export async function POST(request: Request): Promise<Response> {
       throw new BiAiError(400, 'INVALID_DASHBOARD', 'dashboardId inválido.')
     }
     let manifest
-    try { manifest = parseManifest(body.manifest ?? body) }
+    try {
+      manifest = parseManifest(body.manifest ?? body)
+      validateCertifiedQueries(manifest)
+    }
     catch (error) {
-      if (error instanceof ManifestError) throw new BiAiError(400, 'INVALID_MANIFEST', error.message)
+      if (error instanceof ManifestError || error instanceof CertifiedQueryError) {
+        throw new BiAiError(400, 'INVALID_MANIFEST', error.message)
+      }
       throw error
     }
     if (asRecord(manifest.raw.source).registrationReady === false) {
       throw new BiAiError(409, 'PUBLICATION_MISMATCH', 'O modelo publicado ainda não corresponde ao manifesto local.')
+    }
+    if (asRecord(manifest.raw.capabilities).liveDefinitionRequired === true) {
+      try {
+        const schema = await publishedSchema(manifest.workspaceId, manifest.semanticModelId, manifest.reportId)
+        assertPublishedCatalog(manifest, schema, false)
+        manifest.raw.source = { ...asRecord(manifest.raw.source), publishedModelHash: schema.modelHash }
+      } catch (error) {
+        if (error instanceof PublishedSchemaError) {
+          throw new BiAiError(409, 'PUBLICATION_MISMATCH', error.message)
+        }
+        console.error('[bi-ai] registration Fabric schema:', error instanceof Error ? error.message : error)
+        throw new BiAiError(503, 'FABRIC_DEFINITION_UNAVAILABLE', 'Não foi possível confirmar a definição publicada no Fabric.')
+      }
     }
     const result = await registerManifest(manifest, explicitDashboardId)
     return Response.json({ ok: true, ...result, schemaVersion: manifest.schemaVersion })
