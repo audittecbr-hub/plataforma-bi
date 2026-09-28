@@ -28,6 +28,23 @@ Crie um `.env.local` (não versionado) com:
 | `NEXT_PUBLIC_SITE_URL` | Links de e-mail e logo nos templates de e-mail |
 | `NEXUS_WEBHOOK_SECRET`, `NEXT_PUBLIC_CORE_API_URL` | Integrações da automação |
 | `RESEND_API_KEY` | Envio de e-mails (hoje em modo simulado) |
+| `PORTAL_AI_REGISTRATION_SECRET` | Autenticação dos scripts PBIP em `/api/bi-ai/register` |
+| `OPENCODE_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` ou `OPENAI_API_KEY` | Chave do provedor selecionado em `gs_config_ia`, somente no servidor |
+| `BI_AI_ENCRYPTION_KEY` | Chave mestra Base64 de 32 bytes para salvar chaves de provedores cifradas pela aba Administração → IA |
+| `BI_AI_ENABLED` | Fallback opcional antes da migration; `true` ativa o Chat apenas quando não há configuração salva no banco |
+| `BI_AI_PROVIDER`, `BI_AI_MODEL`, `BI_AI_BASE_URL`, `BI_AI_API_KEY` | Configuração opcional de endpoint compatível; `gs_config_ia` tem precedência sobre a escolha por ambiente |
+
+## Chat IA contextual
+
+O Chat IA usa `currentDashboard.id` do visualizador, revalida a sessão e a mesma
+regra de permissão da página no servidor, lê o manifesto vinculado ao registro
+`dashboards` e executa DAX no modelo semântico do Power BI. Veja
+[a arquitetura, contrato e passos de instalação](docs/bi-ai.md).
+Administradores configuram provedores, chaves, modelos, raciocínio e ativação
+por dashboard na aba **IA** do painel administrativo.
+
+**Publish to web é público no lado Power BI. O login do Supabase protege o
+Portal e o Chat, mas não transforma a URL Publish to web em conteúdo privado.**
 
 ## Design System
 

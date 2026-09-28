@@ -31,7 +31,7 @@ export async function listWorkspaceDatasets(workspaceId: string): Promise<Datase
 
     const response = await fetch(
         `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/datasets`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) }
     )
 
     if (!response.ok) {
@@ -92,6 +92,7 @@ async function getAccessToken(): Promise<string> {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body,
+        signal: AbortSignal.timeout(15_000),
     })
 
     if (!response.ok) {
@@ -107,6 +108,106 @@ async function getAccessToken(): Promise<string> {
         expiresAt: Date.now() + ((data.expires_in as number ?? 3600) - 60) * 1000,
     }
     return _tokenCache.value
+}
+
+export type PowerBiErrorCode = 'ENTRA_MISSING' | 'ENTRA_TOKEN' | 'WORKSPACE_ACCESS'
+    | 'MODEL_NOT_FOUND' | 'BUILD_READ' | 'EXECUTE_QUERIES_DISABLED'
+    | 'RLS_SSO' | 'MODEL_INCOMPATIBLE' | 'INVALID_DAX' | 'TIMEOUT' | 'POWERBI_ERROR'
+
+export class PowerBiQueryError extends Error {
+    constructor(readonly code: PowerBiErrorCode, readonly httpStatus: number | null, detail: string) {
+        super(detail)
+        this.name = 'PowerBiQueryError'
+    }
+}
+
+function classifyQueryError(status: number, detail: string): PowerBiErrorCode {
+    const text = detail.toLowerCase()
+    if (/row.level.security|\brls\b|single.sign.on|\bsso\b/.test(text)) return 'RLS_SSO'
+    if (/unsupported|not supported|compatibility level|live connection|push dataset/.test(text)) return 'MODEL_INCOMPATIBLE'
+    if (/execute.?quer|tenant setting|disabled/.test(text) && /disabled|not enabled|not allowed/.test(text)) return 'EXECUTE_QUERIES_DISABLED'
+    if (/build permission|read permission|datasetread/.test(text)) return 'BUILD_READ'
+    if (/dax query failure|syntax error|could not be found|cannot find (table|column|measure)/.test(text)) return 'INVALID_DAX'
+    if (status === 404) return 'MODEL_NOT_FOUND'
+    if (status === 401 || status === 403) return 'WORKSPACE_ACCESS'
+    return 'POWERBI_ERROR'
+}
+
+/** JSON Execute Queries adapter. The dashboard's workspace/model IDs are resolved server-side. */
+export async function executeDaxQuery({
+    workspaceId, semanticModelId, dax, signal,
+}: {
+    workspaceId: string
+    semanticModelId: string
+    dax: string
+    signal?: AbortSignal
+}): Promise<Record<string, unknown>[]> {
+    let token: string
+    try {
+        token = await getAccessToken()
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error('[powerbi] token:', detail)
+        throw new PowerBiQueryError(
+            detail.includes('não configuradas') ? 'ENTRA_MISSING' : 'ENTRA_TOKEN', null, detail,
+        )
+    }
+    let response: Response
+    try {
+        response = await fetch(
+            `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/datasets/${semanticModelId}/executeQueries`,
+            {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ queries: [{ query: dax }], serializerSettings: { includeNulls: true } }),
+                signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000),
+            },
+        )
+    } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error('[powerbi] executeQueries network:', detail)
+        throw new PowerBiQueryError('TIMEOUT', null, detail)
+    }
+    const body = await response.text()
+    if (body.length > 2_000_000) {
+        console.error('[powerbi] executeQueries result too large:', body.length)
+        throw new PowerBiQueryError('POWERBI_ERROR', response.status, 'Resultado maior que o limite do Chat IA.')
+    }
+    if (!response.ok) {
+        console.error(`[powerbi] executeQueries HTTP ${response.status}: ${body.slice(0, 4000)}`)
+        throw new PowerBiQueryError(classifyQueryError(response.status, body), response.status, body.slice(0, 4000))
+    }
+    let data: Record<string, unknown>
+    try { data = JSON.parse(body) as Record<string, unknown> }
+    catch { throw new PowerBiQueryError('POWERBI_ERROR', response.status, 'JSON inválido na resposta Power BI.') }
+    const result = (data.results as Array<Record<string, unknown>> | undefined)?.[0]
+    const table = (result?.tables as Array<Record<string, unknown>> | undefined)?.[0]
+    if (result?.error || table?.error) {
+        const detail = JSON.stringify(result?.error ?? table?.error).slice(0, 4000)
+        console.error('[powerbi] executeQueries result:', detail)
+        throw new PowerBiQueryError(classifyQueryError(response.status, detail), response.status, detail)
+    }
+    if (!table || !Array.isArray(table.rows)) {
+        throw new PowerBiQueryError('POWERBI_ERROR', response.status, 'Resposta sem tabela de resultados.')
+    }
+    return table.rows as Record<string, unknown>[]
+}
+
+export function powerBiUserMessage(error: unknown): string {
+    if (!(error instanceof PowerBiQueryError)) return 'Não consegui consultar o Power BI agora.'
+    switch (error.code) {
+        case 'ENTRA_MISSING': return 'As credenciais do Power BI não estão configuradas.'
+        case 'ENTRA_TOKEN': return 'Falha na autenticação com a Microsoft.'
+        case 'WORKSPACE_ACCESS': return 'O serviço não tem acesso ao workspace do Power BI.'
+        case 'MODEL_NOT_FOUND': return 'O modelo semântico não foi encontrado no workspace.'
+        case 'BUILD_READ': return 'Faltam permissões de leitura ou Build no modelo semântico.'
+        case 'EXECUTE_QUERIES_DISABLED': return 'Execute Queries está desabilitado no tenant Power BI.'
+        case 'RLS_SSO': return 'Este modelo usa RLS/SSO incompatível com a conta de serviço atual.'
+        case 'MODEL_INCOMPATIBLE': return 'Este modelo semântico não é compatível com Execute Queries.'
+        case 'INVALID_DAX': return 'A consulta DAX foi recusada pelo modelo.'
+        case 'TIMEOUT': return 'A consulta ao Power BI excedeu o tempo limite.'
+        default: return 'A consulta ao Power BI falhou. Avise o administrador.'
+    }
 }
 
 /**

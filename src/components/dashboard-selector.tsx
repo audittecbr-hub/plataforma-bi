@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PowerBIEmbed } from '@/components/powerbi-embed'
+import { BiAiChat } from '@/components/bi-ai-chat'
 import { departmentGroup, GROUP_META } from '@/lib/department-meta'
 import { Gem } from 'lucide-react'
 
@@ -159,6 +160,10 @@ export function DashboardSelector({ department, dashboards, headerContent }: Das
               <span className="truncate text-[13.5px] font-semibold text-foreground">{currentDashboard.name}</span>
             </span>
           </div>
+        )}
+
+        {currentDashboard && (
+          <BiAiChat key={currentDashboard.id} dashboardId={currentDashboard.id} dashboardName={currentDashboard.name} />
         )}
       </header>
 

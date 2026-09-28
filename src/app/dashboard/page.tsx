@@ -8,6 +8,7 @@ import { CompanyOverview } from '@/components/company-overview'
 import { Dashboard } from '@/lib/types'
 import { PageHeader } from '@/components/ui/page-header'
 import { firstName } from '@/lib/user-display'
+import { montarContextoUsuario, podeAcessarDashboard } from '@/lib/permissions'
 
 export const metadata = { title: 'Dashboards' }
 
@@ -38,7 +39,7 @@ const getCachedDashboards = unstable_cache(
         const supabase = createAdminClient()
         const { data } = await supabase
             .from('dashboards')
-            .select('*')
+            .select('id, name, embed_url, department, allowed_departments, assigned_user_id, sub_group')
             .order('name', { ascending: true })
         return data ?? []
     },
@@ -71,13 +72,8 @@ export default async function DashboardPage() {
     (a.name || '').trim().localeCompare((b.name || '').trim(), 'pt-BR', { sensitivity: 'base' })
   ) : []
 
-  const department = profile?.department || 'Departamento Desconhecido'
-  // Resolve the user's main department group (e.g. 'Expansão' -> 'Comercial')
-  const mainUserDepartment = DEPARTMENT_GROUPS[department] || department
-  const isDiretoria = mainUserDepartment === 'Diretoria' || profile?.is_admin
-  const allowedSubDepartments = profile?.allowed_sub_departments || []
-  const isManagerOfGroup = DEPARTMENT_GROUPS[department] === department // e.g. Comercial == Comercial
-  const isLeader = profile?.is_leader || false
+  const permissionContext = montarContextoUsuario(user.id, profile)
+  const { department, mainUserDepartment, isDiretoria, allowedSubDepartments, isManagerOfGroup, isLeader } = permissionContext
 
   // Group dashboards by Department Group (for Tabs)
   const dashboardConfig: Record<string, Dashboard[]> = {}
@@ -85,31 +81,7 @@ export default async function DashboardPage() {
 
   if (sortedDashboards && sortedDashboards.length > 0) {
       sortedDashboards.forEach((d) => {
-          // CHECK PERMISSIONS
-          // 1. If Diretoria/Admin, see everything.
-          // 2. If it's an individual dashboard (assigned_user_id exists), only the assigned user sees it.
-          //    Managers of the same group can also see their subordinates' dashboards.
-          // 3. Else, check if dashboard department equals user's department OR is in allowed list.
-          // 4. ALSO check if the dashboard belongs to the user's main group (e.g. Comercial user sees Expansão dash)
-          const dashboardGroup = DEPARTMENT_GROUPS[d.department] || d.department
-
-          let hasAccess = false;
-
-          if (isDiretoria) {
-              hasAccess = true;
-          } else if (d.assigned_user_id) {
-              // Individual dashboard: próprio dono, ou líder do mesmo sub-dept, ou líder de grupo
-              hasAccess = d.assigned_user_id === user.id
-                  || (isLeader && d.department === department)
-                  || (isLeader && isManagerOfGroup && dashboardGroup === mainUserDepartment);
-          } else {
-              hasAccess = d.department === department 
-                || allowedSubDepartments.includes(d.department)
-                || dashboardGroup === department
-                || (d.allowed_departments && d.allowed_departments.includes(department))
-          }
-
-          if (!hasAccess) return;
+          if (!podeAcessarDashboard(d, permissionContext)) return;
 
           // Map the dashboard's specific department to its main group for TAB grouping (Directory view)
           // For non-directory view, we just pass the list and the Selector groups it internally by sub-department.

@@ -8,6 +8,8 @@ import { DashboardsTab } from '@/components/admin/tabs/dashboards-tab'
 import { AutomationTab } from '@/components/admin/tabs/automation-tab'
 import { TemplatesTab } from '@/components/admin/tabs/templates-tab'
 import { AccessLogsTab } from '@/components/admin/tabs/access-logs-tab'
+import { IaTab } from '@/components/admin/tabs/ia-tab'
+import { getAiAdminState } from './ai-actions'
 import { Suspense } from 'react'
 
 import { PageHeader } from '@/components/ui/page-header'
@@ -75,6 +77,11 @@ async function AccessLogsContent() {
     return <AccessLogsTab accessLogs={accessLogs} error={error} />
 }
 
+async function IaContent() {
+    const state = await getAiAdminState()
+    return <IaTab initial={state} />
+}
+
 export default async function AdminPage({
   searchParams,
 }: {
@@ -111,7 +118,7 @@ export default async function AdminPage({
       <PageHeader
         eyebrow="Centro de controle"
         title="Painel administrativo"
-        description="Gerencie contas, dashboards e automações do portal, e acompanhe a auditoria de acessos."
+        description="Gerencie contas, dashboards, automações e inteligência artificial do portal."
       />
 
       <AdminTabsNav />
@@ -119,6 +126,7 @@ export default async function AdminPage({
       <Suspense fallback={<AdminPanelSkeleton />}>
         {tab === 'users' && <UsersContent page={page} search={search} />}
         {tab === 'dashboards' && <DashboardsContent page={page} search={search} />}
+        {tab === 'ia' && <IaContent />}
         {tab === 'automation' && <AutomationContent />}
         {tab === 'templates' && <TemplatesContent />}
         {tab === 'accessLogs' && <AccessLogsContent />}

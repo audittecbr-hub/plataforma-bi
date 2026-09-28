@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bot,
   CalendarClock,
   LayoutDashboard,
   MessageSquareText,
@@ -46,6 +47,7 @@ export type AdminSection = { tab: string; label: string; description: string; ic
 export const ADMIN_SECTIONS: AdminSection[] = [
   { tab: "users", label: "Usuários", description: "Contas, departamentos e permissões", icon: Users },
   { tab: "dashboards", label: "Dashboards", description: "Relatórios, visibilidade e atualizações", icon: LayoutDashboard },
+  { tab: "ia", label: "IA", description: "Provedores, modelos, chaves e dashboards", icon: Bot },
   { tab: "automation", label: "Automação", description: "Agendamentos e contatos de envio", icon: CalendarClock },
   { tab: "templates", label: "Templates", description: "Mensagens usadas nas automações", icon: MessageSquareText },
   { tab: "accessLogs", label: "Acessos", description: "Auditoria de entradas no portal", icon: Activity },

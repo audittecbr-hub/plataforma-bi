@@ -348,7 +348,7 @@ export async function getDashboards(
 
         let query = supabase
             .from('dashboards')
-            .select('*', { count: 'exact' })
+            .select('id, name, department, embed_url, allowed_departments, assigned_user_id, sub_group, created_at', { count: 'exact' })
             .order('department', { ascending: true })
             .order('name', { ascending: true })
 
