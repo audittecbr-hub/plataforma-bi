@@ -155,6 +155,14 @@ test('DAX guard accepts an official measure and bounded dimension grouping', () 
     'EVALUATE TOPN(10, SUMMARIZECOLUMNS(Dim[Unidade], "Receita", CALCULATE([Receita Líquida])), [Receita], DESC)',
     context, manifest, 100,
   ))
+  assert.throws(() => validateDax(
+    'EVALUATE TOPN(10, SUMMARIZECOLUMNS(Dim[Unidade], "Receita", [Receita Líquida], Dim[Unidade] = "A"), [Receita], DESC)',
+    context, manifest, 100,
+  ), /dimensões\/filtros antes/)
+  assert.doesNotThrow(() => validateDax(
+    'EVALUATE TOPN(10, SUMMARIZECOLUMNS(Dim[Unidade], FILTER(VALUES(Dim[Unidade]), Dim[Unidade] = "A"), "Receita", [Receita Líquida]), [Receita], DESC)',
+    context, manifest, 100,
+  ))
   assert.throws(() => validateDax('EVALUATE ROW("X", [Inexistente])', context, manifest, 100), /fora do contexto/)
   assert.throws(() => validateDax('EVALUATE ROW("X", [Painel HTML])', context, manifest, 100), /fora do contexto/)
   assert.throws(() => validateDax(`EVALUATE TOPN(10, SUMMARIZECOLUMNS('Clientes'[CNPJ], "X", [Receita Líquida]))`, context, manifest, 100), /fora do contexto/)

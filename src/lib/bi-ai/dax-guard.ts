@@ -16,6 +16,56 @@ function findByName(items: BiObject[], name: string): BiObject | undefined {
   return items.find((item) => item.name.toLowerCase() === name.toLowerCase())
 }
 
+function summarizeArguments(dax: string): string[] {
+  const match = /\bSUMMARIZECOLUMNS\s*\(/i.exec(dax)
+  if (!match) throw new DaxGuardError('Detalhamento sem SUMMARIZECOLUMNS.')
+  const start = match.index + match[0].length
+  const args: string[] = []
+  let depth = 1
+  let begin = start
+  let quoted = false
+  let tableQuote = false
+  for (let index = start; index < dax.length; index++) {
+    const character = dax[index]
+    if (character === '"' && !tableQuote) {
+      if (quoted && dax[index + 1] === '"') { index++; continue }
+      quoted = !quoted
+    } else if (character === "'" && !quoted) {
+      if (tableQuote && dax[index + 1] === "'") { index++; continue }
+      tableQuote = !tableQuote
+    } else if (!quoted && !tableQuote) {
+      if (character === '(') depth++
+      if (character === ')') depth--
+      if ((character === ',' && depth === 1) || depth === 0) {
+        args.push(dax.slice(begin, index).trim())
+        begin = index + 1
+        if (depth === 0) return args
+      }
+    }
+  }
+  throw new DaxGuardError('SUMMARIZECOLUMNS incompleto.')
+}
+
+function validateSummarizeShape(dax: string): void {
+  const args = summarizeArguments(dax)
+  const isLabel = (arg: string) => /^"(?:[^"]|"")*"$/.test(arg)
+  const labelIndex = args.findIndex(isLabel)
+  if (labelIndex < 1 || (args.length - labelIndex) % 2 !== 0) {
+    throw new DaxGuardError('SUMMARIZECOLUMNS exige dimensões/filtros antes dos pares nome/medida.')
+  }
+  for (const arg of args.slice(0, labelIndex)) {
+    if (!/^(?:'(?:(?:[^']|'')+)'|[A-Za-z_]\w*)\[[^\]]+\]$/.test(arg)
+      && !/^(?:FILTER|KEEPFILTERS)\s*\(/i.test(arg)) {
+      throw new DaxGuardError('Filtro SUMMARIZECOLUMNS inválido; use FILTER(VALUES(...), condição) antes das medidas.')
+    }
+  }
+  for (let index = labelIndex; index < args.length; index += 2) {
+    if (!isLabel(args[index]) || !args[index + 1]) {
+      throw new DaxGuardError('Pares nome/medida inválidos em SUMMARIZECOLUMNS.')
+    }
+  }
+}
+
 /** A deliberately small DAX subset: every model reference must be in the selected manifest context. */
 export function validateDax(
   dax: string,
@@ -44,6 +94,7 @@ export function validateDax(
     if (!match || Number(match[1]) < 1 || Number(match[1]) > maxRows) {
       throw new DaxGuardError(`Detalhamento exige TOPN(1..${maxRows}, SUMMARIZECOLUMNS(...)).`)
     }
+    validateSummarizeShape(compact)
   }
   let depth = 0
   const structural = compact.replace(/"(?:[^"]|"")*"/g, '""').replace(/'((?:[^']|'')+)'/g, "'T'")

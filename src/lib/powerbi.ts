@@ -135,6 +135,7 @@ function classifyQueryError(status: number, detail: string): PowerBiErrorCode {
     if (/execute.?quer|tenant setting|disabled/.test(text) && /disabled|not enabled|not allowed/.test(text)) return 'EXECUTE_QUERIES_DISABLED'
     if (/build permission|read permission|datasetread/.test(text)) return 'BUILD_READ'
     if (/dax query failure|syntax error|could not be found|cannot find (table|column|measure)/.test(text)) return 'INVALID_DAX'
+    if (status === 400 && /datasetexecutequerieserror|function .* expects|query \(\d+, \d+\)/.test(text)) return 'INVALID_DAX'
     if (status === 404) return 'MODEL_NOT_FOUND'
     if (status === 401 || status === 403) return 'WORKSPACE_ACCESS'
     return 'POWERBI_ERROR'
