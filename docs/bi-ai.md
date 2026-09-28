@@ -16,6 +16,15 @@ não lê slicers do iframe Publish to web: filtros devem estar na pergunta.
 O Power BI é a fonte dos números. O Supabase guarda manifesto, mensagens e
 metadados de consultas; não replica fatos nem persiste linhas de resultados.
 
+Quando a pergunta deixa indicador ou período em aberto, o Chat pede um
+esclarecimento antes de executar DAX. A resposta pode ser escolhida em opções
+curtas ou escrita livremente. O servidor combina o esclarecimento com a pergunta
+original e revalida o acesso ao mesmo dashboard; um token cifrado de 30 minutos
+liga essa continuação ao usuário e à conversa. O planejador também pode pedir
+um esclarecimento para ambiguidades de negócio que o catálogo não resolve. Há
+limite de duas rodadas; sem dados suficientes, o Chat informa a limitação em vez
+de escolher silenciosamente uma métrica ou um recorte.
+
 ### Escopo semântico e consultas certificadas
 
 O manifesto pode declarar `certifiedQueries`: receitas de consulta tipadas para

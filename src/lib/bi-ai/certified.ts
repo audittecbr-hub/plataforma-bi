@@ -160,7 +160,7 @@ function matches(rule: CertifiedRule, question: string): boolean {
   const { phrases, allWords, anyWords, excludePhrases } = rule.match
   // Certified recipes in this version apply to a whole year. An explicit
   // month/quarter must never be silently widened to the entire year.
-  const finerPeriod = /\b(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|trimestre|quinzena|semana|dia)\b/.test(normalized)
+  const finerPeriod = /\b(?:janeiro|fevereiro|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro|trimestre|quinzena|semana|dia|hoje|agora|ultimos|ultimas)\b/.test(normalized)
   if (finerPeriod) return false
   return (!phrases.length || phrases.some((phrase) => containsPhrase(normalized, phrase)))
     && allWords.every((word) => containsPhrase(normalized, word))
@@ -171,6 +171,11 @@ function matches(rule: CertifiedRule, question: string): boolean {
 function yearFromQuestion(question: string, currentYear: number): { year: number; assumption: string | null } {
   const years = [...new Set([...question.matchAll(/\b20\d{2}\b/g)].map((match) => Number(match[0])))]
   if (years.length > 1) throw new CertifiedQueryError('Informe um único ano para esta análise.')
+  const normalized = normalizeTerm(question)
+  if (!years.length && /\bano passado\b/.test(normalized)) return { year: currentYear - 1, assumption: null }
+  if (!years.length && /\b(?:este ano|ano atual|ano corrente)\b/.test(normalized)) {
+    return { year: currentYear, assumption: null }
+  }
   return years.length ? { year: years[0], assumption: null }
     : { year: currentYear, assumption: `Ano ${currentYear} assumido por ser o ano atual.` }
 }

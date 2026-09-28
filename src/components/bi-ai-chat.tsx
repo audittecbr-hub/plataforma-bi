@@ -19,7 +19,10 @@ interface Message {
   answer?: string
   error?: string
   queries?: { purpose: string; rowCount: number }[]
+  clarification?: ClarificationResponse
 }
+
+interface ClarificationResponse { question: string; options: string[]; token: string }
 
 interface ConversationSummary { id: string; updated_at: string }
 
@@ -30,6 +33,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
   const [message, setMessage] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [conversationId, setConversationId] = useState<string | null>(null)
+  const [pendingClarification, setPendingClarification] = useState<ClarificationResponse | null>(null)
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [pending, setPending] = useState(false)
@@ -65,6 +69,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
     const body = await response.json()
     if (!response.ok) { setContextError(body.error ?? 'Não foi possível abrir a conversa.'); return }
     setConversationId(id)
+    setPendingClarification(null)
     setMessages((body.messages ?? []).map((row: { id: number; question: string; answer: string }) => ({
       id: String(row.id), question: row.question, answer: row.answer,
     })))
@@ -75,6 +80,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
     activeRequest.current?.abort()
     setPending(false)
     setConversationId(null)
+    setPendingClarification(null)
     setMessages([])
     setMessage('')
     setShowHistory(false)
@@ -84,6 +90,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
     const question = text.trim()
     if (!question || pending || !context?.enabled) return
     const controller = new AbortController()
+    const clarificationToken = pendingClarification?.token
     activeRequest.current = controller
     const id = crypto.randomUUID()
     setMessage('')
@@ -93,15 +100,19 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
       const response = await fetch('/api/bi-ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dashboardId, conversationId, message: question }),
+        body: JSON.stringify({ dashboardId, conversationId, message: question,
+          ...(clarificationToken ? { clarificationToken } : {}) }),
         signal: controller.signal,
       })
       const body = await response.json()
       if (!response.ok) throw new Error(body.error ?? 'Não consegui responder agora.')
       setConversationId(body.conversationId)
+      const clarification = body.clarification as ClarificationResponse | undefined
+      setPendingClarification(clarification ?? null)
       setMessages((old) => old.map((item) => item.id === id
-        ? { ...item, answer: body.answer, queries: body.queries } : item))
-      loadConversations().catch(() => {})
+        ? { ...item, answer: clarification?.question ?? body.answer,
+          clarification, queries: body.queries } : item))
+      if (!clarification) loadConversations().catch(() => {})
     } catch (error) {
       if (controller.signal.aborted) {
         setMessages((old) => old.map((item) => item.id === id ? { ...item, error: 'Pergunta cancelada.' } : item))
@@ -170,6 +181,12 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
                     {item.answer && <div className="rounded-[8px] border bg-surface px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
                       {item.answer}
                       {!!item.queries?.length && <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{item.queries.length} consulta(s) ao Power BI</p>}
+                      {item.clarification && <div className="mt-3 flex flex-wrap gap-2" aria-label="Opções de esclarecimento">
+                        {item.clarification.options.map((option) => <Button key={option} type="button"
+                          variant="secondary" size="sm" onClick={() => send(option)}
+                          disabled={pending || pendingClarification?.token !== item.clarification?.token}>{option}</Button>)}
+                        <p className="w-full text-xs text-muted-foreground">Você também pode responder com suas próprias palavras abaixo.</p>
+                      </div>}
                     </div>}
                     {item.error && <div className="rounded-[8px] border border-destructive/40 px-3 py-2 text-sm text-destructive">{item.error}</div>}
                     {!item.answer && !item.error && pending && <p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> Consultando o modelo e conferindo a resposta…</p>}
@@ -182,7 +199,8 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
           <div className="border-t p-4">
             <div className="flex items-end gap-2">
               <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} maxLength={500}
-                placeholder="Pergunte sobre este relatório…" disabled={!context?.enabled || pending}
+                placeholder={pendingClarification ? 'Responda ao esclarecimento acima…' : 'Pergunte sobre este relatório…'}
+                disabled={!context?.enabled || pending}
                 onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(message) } }}
                 className="max-h-28 resize-none" />
               {pending ? (

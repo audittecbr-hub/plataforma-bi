@@ -11,6 +11,8 @@ import { decryptApiKey, encryptApiKey, parseEncryptionKey } from '../src/lib/ai-
 import { modelProtocol, modelSupportedByAdapter, reasoningOptions } from '../src/lib/ai-reasoning'
 import { certifiedPlan, certifiedScopeMessage, validateCertifiedQueries } from '../src/lib/bi-ai/certified'
 import { assertPublishedCatalog, parsePublishedSchema } from '../src/lib/bi-ai/fabric-schema'
+import { basicClarification, continueClarification, issueClarificationToken,
+  readClarificationToken } from '../src/lib/bi-ai/clarification'
 
 const raw = {
   schemaVersion: '1.0',
@@ -216,6 +218,38 @@ test('planner caps queries and refuses unanswerable questions without DAX', () =
       dax: 'EVALUATE ROW("Receita", [Receita Líquida])', maxRows: 1 }] }),
   context, manifest, 'receita')
   assert.equal(qualified.queries.length, 1)
+  const ask = parsePlan(JSON.stringify({ answerable: false, clarification: {
+    question: 'Qual período e qual medida?', options: ['Realizado em 2026', 'Projetado em 2026'],
+  } }), context, manifest, 'resultado?')
+  assert.equal(ask.clarification?.question, 'Qual período e qual medida?')
+  assert.equal(ask.queries.length, 0)
+})
+
+test('ambiguous BI question asks back and continuation is bound to the user and dashboard', () => {
+  const withResults = parseManifest({ ...raw, model: { ...raw.model, measures: [
+    ...raw.model.measures,
+    { name: 'Resultado Realizado', table: 'Fato' },
+    { name: 'Resultado Projetado', table: 'Fato' },
+  ] } })
+  const prompt = basicClarification('qual resultado mensal?', withResults, 2026)!
+  assert.match(prompt.question, /tipo de resultado/)
+  assert.equal(prompt.options.length, 3)
+  assert.deepEqual(basicClarification('qual resultado mensal em 2026?', withResults, 2026)?.required, ['resultKind'])
+  assert.equal(basicClarification('Qual o resultado realizado em 2026?', withResults, 2026), null)
+  const binding = { userId: 'user-1', dashboardId: 'dashboard-1', conversationId: 'conversation-1' }
+  const key = Buffer.alloc(32, 9)
+  const issuedAt = Date.now()
+  const token = issueClarificationToken({ ...binding, original: 'qual resultado mensal?',
+    count: 1, required: prompt.required ?? [], issuedAt }, key)
+  const pending = readClarificationToken(token, binding, key, issuedAt + 1_000)
+  const partial = continueClarification(pending, '2026', 2026)
+  assert.match(partial.followUp?.question ?? '', /realizado, projetado/)
+  const finished = continueClarification(pending, 'Realizado em 2026', 2026)
+  assert.equal(finished.followUp, null)
+  assert.match(finished.question, /Esclarecimento do usuário: Realizado em 2026/)
+  assert.throws(() => readClarificationToken(token, { ...binding, userId: 'user-2' }, key, issuedAt + 1_000), /inválido/)
+  assert.throws(() => readClarificationToken(token, binding, key, issuedAt + 31 * 60_000), /expirado/)
+  assert.throws(() => readClarificationToken(token.slice(0, -2) + 'aa', binding, key, issuedAt + 1_000), /inválido/)
 })
 
 test('answer numbers must be present in real result or user period', () => {

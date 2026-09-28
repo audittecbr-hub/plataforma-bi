@@ -1,6 +1,7 @@
 import { asRecord, safeText, type BiManifest } from './manifest'
 import type { SelectedContext } from './context'
 import { validateDax } from './dax-guard'
+import type { ClarificationPrompt } from './clarification'
 
 export interface PlannedQuery {
   purpose: string
@@ -15,6 +16,7 @@ export interface QueryPlan {
   objectsUsed: string[]
   queries: PlannedQuery[]
   assumptions: string[]
+  clarification?: ClarificationPrompt
 }
 
 function parseObject(text: string): Record<string, unknown> {
@@ -32,6 +34,17 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
   const rowLimit = detail ? manifest.policy.maxRows : Math.min(100, manifest.policy.maxRows)
   const objectsUsed = Array.isArray(raw.objectsUsed)
     ? raw.objectsUsed.filter((item): item is string => typeof item === 'string').slice(0, 50) : []
+  if (!raw.answerable) {
+    const clarification = asRecord(raw.clarification)
+    const followUp = safeText(clarification.question, 240)
+    const options = Array.isArray(clarification.options)
+      ? [...new Set(clarification.options.map((item) => safeText(item, 100)).filter(Boolean))].slice(0, 4) : []
+    return {
+      answerable: false, intent: safeText(raw.intent, 100), reason: safeText(raw.reason, 300),
+      objectsUsed: [], queries: [], assumptions: [],
+      ...(followUp ? { clarification: { question: followUp, options } } : {}),
+    }
+  }
   const allowed = new Set([
     ...context.tables.map((table) => table.name.toLowerCase()),
     ...context.measures.map((measure) => measure.name.toLowerCase()),
@@ -41,12 +54,6 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
   ])
   if (objectsUsed.some((name) => !allowed.has(name.toLowerCase()))) {
     throw new Error('Plano citou objeto fora do contexto autorizado.')
-  }
-  if (!raw.answerable) {
-    return {
-      answerable: false, intent: safeText(raw.intent, 100), reason: safeText(raw.reason, 300),
-      objectsUsed: [], queries: [], assumptions: [],
-    }
   }
   if (!Array.isArray(raw.queries) || raw.queries.length < 1 || raw.queries.length > queryLimit) {
     throw new Error(`Plano precisa conter de 1 a ${queryLimit} consultas.`)
