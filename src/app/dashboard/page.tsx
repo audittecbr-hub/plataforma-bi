@@ -6,6 +6,7 @@ import { DEPARTMENT_GROUPS } from '@/lib/constants'
 import { DepartmentView } from '@/components/department-view'
 import { CompanyOverview } from '@/components/company-overview'
 import { Dashboard } from '@/lib/types'
+<<<<<<< HEAD
 import { PageHeader } from '@/components/ui/page-header'
 import { firstName } from '@/lib/user-display'
 import { montarContextoUsuario, podeAcessarDashboard } from '@/lib/permissions'
@@ -27,6 +28,9 @@ function dataPorExtenso(agora: Date) {
   const texto = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TIMEZONE }).format(agora)
   return texto.charAt(0).toUpperCase() + texto.slice(1)
 }
+=======
+import ExecutiveAgent from '@/components/ExecutiveAgent'
+>>>>>>> f36f618 (feat: adicionar ExecutiveAgent no dashboard e scripts auxiliares)
 
 // A página permanece dinâmica porque renderiza conteúdo específico do usuário autenticado.
 // Apenas a lista de dashboards (dado não sensível, igual para todos) é cacheada separadamente.
@@ -210,6 +214,7 @@ export default async function DashboardPage() {
           />
         )}
       </div>
+      <ExecutiveAgent />
     </>
   )
 }
