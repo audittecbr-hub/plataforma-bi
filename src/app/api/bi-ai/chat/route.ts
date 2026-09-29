@@ -4,7 +4,7 @@ import { answerBiQuestion } from '@/lib/bi-ai/pipeline'
 import { manifestForDashboard } from '@/lib/bi-ai/registry'
 
 export const runtime = 'nodejs'
-export const maxDuration = 180
+export const maxDuration = 300
 
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -19,7 +19,7 @@ export async function POST(request: Request): Promise<Response> {
       throw new BiAiError(400, 'INVALID_INPUT', 'Informe dashboardId, conversationId opcional e message.')
     }
     const { user, profile, dashboard } = await authorizedDashboard(body.dashboardId)
-    const manifest = manifestForDashboard(dashboard)
+    const manifest = await manifestForDashboard(dashboard)
     const answer = await answerBiQuestion({
       dashboard, manifest, userId: user.id, isAdmin: profile?.is_admin === true,
       conversationId: body.conversationId || null, message: body.message,

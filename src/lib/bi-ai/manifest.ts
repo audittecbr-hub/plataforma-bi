@@ -89,6 +89,17 @@ export function safeText(value: unknown, max = 280): string {
   return text.slice(0, max)
 }
 
+/** Text from Fabric metadata may include connection details in comments. */
+export function safeMetadataText(value: unknown, max = 280): string {
+  const text = typeof value === 'string' ? value : ''
+  return safeText(text
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[servidor omitido]')
+    .replace(/\b(?:PostgreSQL|Sql|Odbc|OData|Web|Excel|Folder)\.[A-Za-z_]+\s*\([^)]*\)/gi, '[conexão omitida]')
+    .replace(/\b(?:Data Source|Server|Host|User ID|UID|Password|PWD|client_secret|service_role_key|api[_-]?key|access[_-]?token)\s*[:=]\s*[^;\s,]+/gi, '[credencial omitida]')
+    .replace(/\b(?:postgres(?:ql)?|mssql|mysql):\/\/[^\s]+/gi, '[conexão omitida]')
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[endereço omitido]'), max)
+}
+
 function strings(value: unknown, maxCount = 12): string[] {
   if (!Array.isArray(value)) return []
   return value.slice(0, maxCount).map((v) => safeText(typeof v === 'string' ? v : asRecord(v).description, 180)).filter(Boolean)
@@ -112,22 +123,25 @@ function identityId(kind: string, fields: unknown[]): string | null {
   return ids[0].toLowerCase()
 }
 
-function normalObject(source: Record<string, unknown>, table?: string): BiObject {
+function normalObject(source: Record<string, unknown>, table?: string, fullModelAccess = false): BiObject {
   const name = safeText(valueOf(source, 'name', 'nome'), 200)
   const formula = stringOf(valueOf(source, 'expression', 'formula', 'dax'))
   const html = /<\s*(?:div|table|style|svg|html)|data:image|base64/i.test(formula)
-    || formula.length > 3000
   return {
     name,
     table,
-    description: safeText(valueOf(source, 'description', 'descricao'), 400),
+    // 4000 chars: a descrição escrita no Power BI carrega a regra de negócio inteira
+    // (o corte antigo de 400 jogava fora justamente o que a IA precisa).
+    description: safeText(valueOf(source, 'description', 'descricao'), 4000),
     synonyms: strings(valueOf(source, 'synonyms', 'aliases', 'sinonimos')),
-    restricted: source.restricted === true || source.classification === 'restricted',
+    restricted: !fullModelAccess && (source.restricted === true || source.classification === 'restricted'),
     presentationOnly: source.presentationOnly === true || html,
     preferredMeasure: source.preferredMeasure === true || source.preferred === true,
-    queryable: source.queryable !== false && source.technical !== true,
+    queryable: fullModelAccess || (source.queryable !== false && source.technical !== true),
     semanticRole: safeText(source.semanticRole, 40) || undefined,
-    aggregatable: source.aggregatable === true || source.aggregationAllowed === true,
+    aggregatable: source.aggregatable === true || source.aggregationAllowed === true
+      || (fullModelAccess && /^(?:int|integer|decimal|double|float|currency|number|numeric|whole)/i
+        .test(stringOf(valueOf(source, 'dataType', 'type')))),
     dependencies: strings(valueOf(source, 'dependencies', 'dependsOn'), 30),
     intent: safeText(source.intent, 250) || undefined,
     whenToUse: safeText(source.whenToUse, 300) || undefined,
@@ -149,6 +163,10 @@ export function parseManifest(input: unknown): BiManifest {
   const identity = asRecord(raw.identity)
   const source = asRecord(raw.source)
   const model = asRecord(raw.model)
+  // A autorização é pelo dashboard: após validá-la, o Chat pode consultar
+  // todo o modelo semântico ligado a ele, inclusive manifestos antigos.
+  const capabilities = { ...asRecord(raw.capabilities), fullModelAccess: true }
+  const fullModelAccess = true
   const workspaceId = identityId('workspaceId', [identity.workspaceId, source.workspaceId, source.groupId])
   const semanticModelId = identityId('semanticModelId', [
     identity.semanticModelId, identity.datasetId, source.semanticModelId, source.datasetId,
@@ -164,23 +182,26 @@ export function parseManifest(input: unknown): BiManifest {
   if (tableRows.length > 500 || measureRows.length > 5000) throw new ManifestError('Catálogo semântico grande demais.')
   const tables: BiTable[] = tableRows.map((row) => {
     const name = safeText(valueOf(row, 'name', 'nome'), 200)
-    const columns = entries(valueOf(row, 'columns', 'colunas')).map((column) => normalObject(column, name))
+    const columns = entries(valueOf(row, 'columns', 'colunas'))
+      .map((column) => normalObject(column, name, fullModelAccess))
     if (!name || columns.length > 1000 || columns.some((column) => !column.name)) {
       throw new ManifestError('Tabela ou coluna sem nome, ou tabela grande demais.')
     }
     return {
       name,
-      description: safeText(valueOf(row, 'description', 'descricao'), 400),
+      description: safeText(valueOf(row, 'description', 'descricao'), 4000),
       synonyms: strings(valueOf(row, 'synonyms', 'aliases', 'sinonimos')),
-      queryable: row.queryable !== false && row.technical !== true,
+      queryable: fullModelAccess || (row.queryable !== false && row.technical !== true),
       fact: row.fact === true || /^(fact|fato)$/i.test(stringOf(row.kind)) || /^(fact|fato)(?:[_ ]|$)/i.test(name),
       columns,
     }
   })
-  const measures = measureRows.map((row) => normalObject(row, safeText(valueOf(row, 'table', 'tableName'), 200) || undefined))
+  const measures = measureRows.map((row) => normalObject(row,
+    safeText(valueOf(row, 'table', 'tableName'), 200) || undefined, fullModelAccess))
   for (const table of tableRows) {
     const tableName = safeText(valueOf(table, 'name', 'nome'), 200)
-    measures.push(...entries(valueOf(table, 'measures', 'medidas')).map((measure) => normalObject(measure, tableName)))
+    measures.push(...entries(valueOf(table, 'measures', 'medidas'))
+      .map((measure) => normalObject(measure, tableName, fullModelAccess)))
   }
   if (!tables.length && !measures.length) throw new ManifestError('model precisa listar tabelas ou medidas.')
   if (measures.some((measure) => !measure.name)) throw new ManifestError('Medida sem nome.')
@@ -192,7 +213,6 @@ export function parseManifest(input: unknown): BiManifest {
   const policy = asRecord(raw.queryPolicy)
   const business = asRecord(raw.business)
   const report = asRecord(raw.report)
-  const capabilities = asRecord(raw.capabilities)
   const queryExamples = entries(raw.queryExamples).slice(0, 100).map((example) => ({
     question: safeText(valueOf(example, 'question', 'pergunta'), 250),
     dax: stringOf(example.dax).slice(0, 3000),
@@ -216,9 +236,9 @@ export function parseManifest(input: unknown): BiManifest {
     ambiguities: strings(raw.ambiguities, 30),
     policy: {
       maxRows: numberInRange(valueOf(policy, 'maxRows', 'defaultMaxRows'), 100, 1, 500),
-      maxQueries: numberInRange(policy.maxQueries, 5, 1, 5),
+      maxQueries: numberInRange(policy.maxQueries, 5, 1, 12),
       allowRestrictedForAdmins: policy.allowRestrictedForAdmins === true,
-      allowDirectColumnAggregation: policy.allowDirectColumnAggregation === true,
+      allowDirectColumnAggregation: fullModelAccess || policy.allowDirectColumnAggregation === true,
     },
   }
 }

@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, X, Loader2, BarChart2 } from 'lucide-react';
+import { Send, X, Loader2 } from 'lucide-react';
 
 export default function ExecutiveAgent() {
   const [isOpen, setIsOpen] = useState(false);
@@ -53,7 +53,7 @@ export default function ExecutiveAgent() {
 
       const data = await JSON.parse(await res.text());
       setMessages(prev => [...prev, { role: 'assistant', content: data.content }]);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Erro no chat:", error);
       setMessages(prev => [...prev, { role: 'assistant', content: 'Desculpe, houve um erro de conexão com o servidor. Verifique sua internet ou tente novamente em instantes.' }]);
     } finally {

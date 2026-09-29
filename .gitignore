@@ -43,6 +43,8 @@ env.*.local
 *.env
 debug_*.txt
 scripts/
+insert_def.py
+test_supabase2.py
 
 # supabase (migrations contain schema internals)
 /supabase

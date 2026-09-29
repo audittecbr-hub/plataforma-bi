@@ -12,7 +12,13 @@ export function SidebarUser({ user, signOutAction }: { user: PortalUser; signOut
   const { collapsed } = useSidebar()
   const nome = displayName(user)
 
-  const botaoSair = (
+  /**
+   * Precisa ser uma FUNÇÃO, não um elemento compartilhado.
+   * O botão é renderizado em dois formulários (aberto e recolhido); reutilizar o
+   * mesmo objeto de elemento faria o `asChild` do Radix prender o mesmo ref em
+   * dois nós do DOM — o que bagunça a reconciliação no momento da hidratação.
+   */
+  const botaoSair = () => (
     <Hint label="Sair do portal" side={collapsed ? "right" : "top"}>
       <button
         type="submit"
@@ -44,11 +50,11 @@ export function SidebarUser({ user, signOutAction }: { user: PortalUser; signOut
           <p className="truncate text-[11.5px] leading-tight text-muted-foreground">{describeRole(user)}</p>
         </div>
         <form action={signOutAction} className="group-data-[collapsed=true]/sidebar:hidden">
-          {botaoSair}
+          {botaoSair()}
         </form>
       </div>
       <form action={signOutAction} className="mt-2 hidden justify-center group-data-[collapsed=true]/sidebar:flex">
-        {botaoSair}
+        {botaoSair()}
       </form>
     </div>
   )

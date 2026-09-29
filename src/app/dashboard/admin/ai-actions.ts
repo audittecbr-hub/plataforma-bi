@@ -9,6 +9,7 @@ import { encryptionConfigured, readProviderSettings, removeStoredProviderKey,
   setModelEnabled, setProviderEnabled, storeProviderKey } from '@/lib/ai-keyring'
 import { isReasoningEffort, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
 import { parseLinkedManifest } from '@/lib/bi-ai/manifest'
+import { previewLiveManifest } from '@/lib/bi-ai/registry'
 
 async function requireAdminId(): Promise<string> {
   const supabase = await createClient()
@@ -174,8 +175,13 @@ export async function toggleDashboardAi(dashboardId: string, enabled: boolean) {
   const { data: dashboard, error } = await admin.from('dashboards').select('*').eq('id', dashboardId).maybeSingle()
   if (error || !dashboard) return { ok: false, error: 'Dashboard não encontrado.' }
   if (enabled) {
-    try { parseLinkedManifest({ ...dashboard, ai_enabled: true }) }
-    catch { return { ok: false, error: 'Registre um manifesto válido e alinhado ao Power BI antes de ativar.' } }
+    try {
+      if (dashboard.ai_manifest) parseLinkedManifest({ ...dashboard, ai_enabled: true })
+      else await previewLiveManifest({ ...dashboard, ai_enabled: true })
+    } catch (error) {
+      console.error('[ai admin] dashboard activation failed:', error instanceof Error ? error.message : error)
+      return { ok: false, error: 'Não foi possível confirmar o modelo e o relatório publicados no Fabric. Confira os IDs e as permissões do serviço.' }
+    }
   }
   const { error: updateError } = await admin.from('dashboards').update({ ai_enabled: enabled }).eq('id', dashboardId)
   if (updateError) return { ok: false, error: 'Não foi possível atualizar o dashboard.' }

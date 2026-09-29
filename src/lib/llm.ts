@@ -280,7 +280,7 @@ async function conversarOpenAI(
         method: 'POST',
         headers: cabecalhos,
         body: JSON.stringify(corpo),
-        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
+        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
     })
 
     if (!r.ok) {
@@ -399,7 +399,7 @@ async function conversarAnthropic(
             ...(p.headers ?? {}),
         },
         body: JSON.stringify(corpo),
-        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
+        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
     })
 
     if (!r.ok) {
@@ -460,7 +460,7 @@ async function conversarResponses(
             'User-Agent': 'portal-bi/1.0',
         },
         body: JSON.stringify(body),
-        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(60_000)]) : AbortSignal.timeout(60_000),
+        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
     })
     if (!response.ok) {
         const detail = (await response.text()).slice(0, 400)

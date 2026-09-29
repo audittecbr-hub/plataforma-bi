@@ -28,7 +28,8 @@ async function boundedJson(response: Response): Promise<Record<string, unknown>>
 }
 
 async function request(url: string, token: string, method: 'GET' | 'POST'): Promise<Response> {
-  return fetch(url, { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  return fetch(url, { method, headers: { Authorization: `Bearer ${token}`, Accept: 'application/json',
+    'x-ms-fabric-skill': 'semantic-model-authoring' },
     signal: AbortSignal.timeout(30_000), cache: 'no-store' })
 }
 
@@ -70,10 +71,7 @@ async function load(workspaceId: string, semanticModelId: string, reportId: stri
   const token = await getFabricAccessToken()
   const [model, report] = await Promise.all([
     definitionParts(workspaceId, semanticModelId, 'semanticModels', token),
-    reportId ? definitionParts(workspaceId, reportId, 'reports', token).catch((error) => {
-      console.error('[bi-ai] report definition unavailable:', error instanceof Error ? error.message : error)
-      return [] as FabricPart[]
-    }) : Promise.resolve([] as FabricPart[]),
+    reportId ? definitionParts(workspaceId, reportId, 'reports', token) : Promise.resolve([] as FabricPart[]),
   ])
   return parsePublishedSchema(model, report)
 }

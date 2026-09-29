@@ -2,16 +2,46 @@ import 'server-only'
 
 import { createAdminClient } from '@/utils/supabase/admin'
 import { BiAiError, type DashboardRow } from './access'
-import { manifestHash, ManifestLinkError, parseLinkedManifest, type BiManifest } from './manifest'
+import { manifestHash, ManifestLinkError, parseLinkedManifest, parseManifest, type BiManifest } from './manifest'
+import { publishedSchema } from './fabric-context'
+import { assertPublishedCatalog } from './fabric-schema'
+import { liveCatalog, liveManifestInput, synthesizeManifest } from './live-model'
 
-export function manifestForDashboard(dashboard: DashboardRow): BiManifest {
-  try { return parseLinkedManifest(dashboard) }
-  catch (error) {
-    if (error instanceof ManifestLinkError) {
+/**
+ * O manifesto curado tem prioridade quando existe.
+ * Sem manifesto, o modelo publicado é catalogado AO VIVO (INFO.VIEW.* + definição Fabric),
+ * o que permite liberar qualquer projeto no portal sem preparar nada no Power BI.
+ */
+export async function previewLiveManifest(dashboard: DashboardRow): Promise<BiManifest> {
+  const { workspaceId, semanticModelId } = liveManifestInput(dashboard)
+  const [published, catalog] = await Promise.all([
+    publishedSchema(workspaceId, semanticModelId, dashboard.report_id ?? null),
+    liveCatalog(workspaceId, semanticModelId),
+  ])
+  const manifest = parseManifest(synthesizeManifest({ dashboard, catalog, published }))
+  assertPublishedCatalog(manifest, published, false)
+  return manifest
+}
+
+export async function manifestForDashboard(dashboard: DashboardRow): Promise<BiManifest> {
+  if (dashboard.ai_enabled !== true) {
+    throw new BiAiError(409, 'AI_DISABLED', 'A IA ainda não está habilitada para este relatório.')
+  }
+  try {
+    return parseLinkedManifest(dashboard)
+  } catch (error) {
+    if (!(error instanceof ManifestLinkError)) throw error
+    if (error.code !== 'MANIFEST_MISSING') {
       console.error('[bi-ai] manifest link:', dashboard.id, error.code)
       throw new BiAiError(409, error.code, error.message)
     }
-    throw error
+  }
+  try {
+    return await previewLiveManifest(dashboard)
+  } catch (error) {
+    console.error('[bi-ai] live catalog:', dashboard.id, error)
+    throw new BiAiError(409, 'LIVE_CATALOG_FAILED',
+      'Não consegui catalogar este modelo no Power BI. Confira o vínculo do dashboard e as permissões do serviço.')
   }
 }
 

@@ -2,6 +2,7 @@ import { asRecord, safeText, type BiManifest } from './manifest'
 import type { SelectedContext } from './context'
 import { validateDax } from './dax-guard'
 import type { ClarificationPrompt } from './clarification'
+import { normalizeTerm } from './context'
 
 export interface PlannedQuery {
   purpose: string
@@ -17,19 +18,44 @@ export interface QueryPlan {
   queries: PlannedQuery[]
   assumptions: string[]
   clarification?: ClarificationPrompt
+  inspect?: string[]
 }
 
 function parseObject(text: string): Record<string, unknown> {
   const clean = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
   try { return asRecord(JSON.parse(clean)) }
-  catch { throw new Error('A IA não retornou JSON estruturado válido.') }
+  catch {
+    // Alguns modelos gratuitos ignoram response_format e envolvem o JSON em
+    // uma frase curta ou em markdown. Extraia somente o primeiro objeto JSON;
+    // o conteúdo continua validado abaixo antes de chegar ao Power BI.
+    const start = clean.indexOf('{')
+    const end = clean.lastIndexOf('}')
+    if (start >= 0 && end > start) {
+      try { return asRecord(JSON.parse(clean.slice(start, end + 1))) }
+      catch { /* retry with provider feedback */ }
+    }
+    throw new Error('A IA não retornou JSON estruturado válido.')
+  }
+}
+
+/** A data answer needs Power BI rows; only model/report explanations may omit DAX. */
+function metadataOnlyQuestion(question: string): boolean {
+  const text = normalizeTerm(question)
+  if (/\b20\d{2}\b|\b(?:quanto|valor|total|ranking|desvio|variacao|mensal|trimestral|comparacao|compare)\b/.test(text)) return false
+  return /^(?:o que (?:e|significa|tem|mostra)|como (?:funciona|e calculad[oa])|qual (?:e |a |o )?(?:regra|definicao|formula|pagina|medida)|quais (?:sao )?(?:as |os )?(?:paginas|indicadores|filtros|medidas)|onde (?:fica|encontro|esta)|esse numero (?:considera|inclui|exclui))\b/.test(text)
 }
 
 export function parsePlan(text: string, context: SelectedContext, manifest: BiManifest, question: string): QueryPlan {
   const raw = parseObject(text)
+  if (raw.action === 'inspect') {
+    const inspect = Array.isArray(raw.inspect)
+      ? [...new Set(raw.inspect.map((item) => safeText(item, 200)).filter(Boolean))].slice(0, 12) : []
+    if (!inspect.length) throw new Error('Inspeção sem nomes de objetos.')
+    return { answerable: false, intent: 'Inspecionar modelo publicado', reason: '',
+      objectsUsed: [], queries: [], assumptions: [], inspect }
+  }
   if (typeof raw.answerable !== 'boolean') throw new Error('Plano sem answerable.')
-  const complex = /por que|porque|motivo|causa|queda|caiu|variou|compar|explic/i.test(question)
-  const queryLimit = Math.min(manifest.policy.maxQueries, complex ? 5 : 3)
+  const queryLimit = manifest.policy.maxQueries
   const detail = /lista|liste|detalh|top\s*\d|ranking/i.test(question)
   const rowLimit = detail ? manifest.policy.maxRows : Math.min(100, manifest.policy.maxRows)
   const objectsUsed = Array.isArray(raw.objectsUsed)
@@ -45,27 +71,29 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
       ...(followUp ? { clarification: { question: followUp, options } } : {}),
     }
   }
-  const allowed = new Set([
-    ...context.tables.map((table) => table.name.toLowerCase()),
-    ...context.measures.map((measure) => measure.name.toLowerCase()),
-    ...context.measures.filter((measure) => measure.table)
-      .map((measure) => `${measure.table}[${measure.name}]`.toLowerCase()),
-    ...context.columns.map((column) => `${column.table}[${column.name}]`.toLowerCase()),
-  ])
-  if (objectsUsed.some((name) => !allowed.has(name.toLowerCase()))) {
-    throw new Error('Plano citou objeto fora do contexto autorizado.')
-  }
-  if (!Array.isArray(raw.queries) || raw.queries.length < 1 || raw.queries.length > queryLimit) {
-    throw new Error(`Plano precisa conter de 1 a ${queryLimit} consultas.`)
+  // objectsUsed is explanatory metadata. The actual DAX below is the
+  // authoritative source for object validation; models often quote the names
+  // in this list differently (e.g. 'Tabela'[Coluna] or [Medida]).
+  // Consultas podem ser zero: perguntas sobre o próprio relatório (o que uma página
+  // mostra, qual o filtro padrão, o que significa um indicador) são respondidas do
+  // contexto, sem executar DAX.
+  if (!Array.isArray(raw.queries) || raw.queries.length > queryLimit) {
+    throw new Error(`Plano precisa conter no máximo ${queryLimit} consultas.`)
   }
   const queries = raw.queries.map((item) => {
-    const row = asRecord(item)
+    // OpenCode Go's free models occasionally compress the requested object
+    // into a plain DAX string. Accept that shorthand and apply the same guard
+    // and row limit as the verbose form.
+    const row = typeof item === 'string' ? { dax: item } : asRecord(item)
     const dax = typeof row.dax === 'string' ? row.dax.trim() : ''
     const requested = Number.isInteger(row.maxRows) ? row.maxRows as number : rowLimit
     const maxRows = Math.min(Math.max(requested, 1), rowLimit)
     validateDax(dax, context, manifest, maxRows)
     return { purpose: safeText(row.purpose, 160) || 'Consulta', dax, maxRows }
   })
+  if (!queries.length && !metadataOnlyQuestion(question)) {
+    throw new Error('Uma resposta sobre dados precisa consultar o modelo Power BI com DAX.')
+  }
   return {
     answerable: true,
     intent: safeText(raw.intent, 100),
@@ -92,6 +120,50 @@ export function trimResults(rows: Record<string, unknown>[], maxRows: number) {
     bytes += size
   }
   return { rows: trimmed, truncated: rows.length > trimmed.length, rowCount: rows.length }
+}
+
+export interface GroupedExecution {
+  dax: string
+  groupKey?: string
+  sortKey?: string
+  descending?: boolean
+}
+
+/** TOPN selects rows but does not guarantee their presentation order. */
+export function prepareGroupedExecution(dax: string, visibleRows: number): GroupedExecution {
+  const top = /^(\s*EVALUATE\s+TOPN\s*\(\s*)(\d+)/i.exec(dax)
+  const group = /\bSUMMARIZECOLUMNS\s*\(\s*(?:'((?:[^']|'')+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]/i.exec(dax)
+    ?? /\bADDCOLUMNS\s*\(\s*VALUES\s*\(\s*(?:'((?:[^']|'')+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]/i.exec(dax)
+  const sort = /,\s*\[([^\]]+)\]\s*,\s*(ASC|DESC)\s*\)\s*$/i.exec(dax)
+  if (!top || !group || !sort) return { dax }
+  const table = (group[1] ?? group[2]).replace(/''/g, "'")
+  const requested = Number(top[2])
+  const fetched = Math.min(500, Math.max(requested, visibleRows) + 10)
+  return {
+    dax: dax.replace(top[0], `${top[1]}${fetched}`),
+    groupKey: `${table}[${group[3]}]`,
+    sortKey: sort[1],
+    descending: sort[2].toUpperCase() === 'DESC',
+  }
+}
+
+export function normalizeGroupedRows(rows: Record<string, unknown>[], execution: GroupedExecution,
+  question: string): { rows: Record<string, unknown>[]; blankGroupsExcluded: boolean } {
+  if (!execution.groupKey || !execution.sortKey) return { rows, blankGroupsExcluded: false }
+  const keepBlank = /\b(?:em branco|sem (?:opera[cç][aã]o|categoria|departamento)|n[aã]o atribu[ií]d[oa])\b/i.test(question)
+  const filtered = keepBlank ? rows : rows.filter((row) => {
+    const value = row[execution.groupKey!]
+    return value !== null && value !== undefined && String(value).trim() !== ''
+  })
+  const key = `[${execution.sortKey}]`
+  if (filtered.every((row) => typeof (row[key] ?? row[execution.sortKey!]) === 'number')) {
+    filtered.sort((a, b) => {
+      const left = Number(a[key] ?? a[execution.sortKey!])
+      const right = Number(b[key] ?? b[execution.sortKey!])
+      return execution.descending ? right - left : left - right
+    })
+  }
+  return { rows: filtered, blankGroupsExcluded: filtered.length < rows.length }
 }
 
 function numericValue(token: string): number | null {
@@ -142,7 +214,14 @@ export function answerIsGrounded(answer: string, results: Record<string, unknown
 }
 
 export function parseAnswer(text: string): string {
-  const raw = parseObject(text)
+  let raw: Record<string, unknown>
+  try { raw = parseObject(text) }
+  catch {
+    // The free OpenCode models can return the explanation as plain text even
+    // when response_format=json_object was requested. It is still checked for
+    // grounding by the caller before it is shown to the user.
+    raw = { answer: text.trim().replace(/^```(?:text)?\s*/i, '').replace(/\s*```$/, '') }
+  }
   const answer = typeof raw.answer === 'string'
     ? raw.answer.replace(/<[^>]*>/g, ' ').replace(/[A-Za-z0-9+/]{300,}={0,2}/g, '[conteúdo omitido]').trim().slice(0, 3500)
     : ''

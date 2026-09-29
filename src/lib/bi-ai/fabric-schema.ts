@@ -1,16 +1,26 @@
 import { createHash } from 'node:crypto'
-import { asRecord, safeText, type BiManifest } from './manifest'
+import { asRecord, safeMetadataText, safeText, type BiManifest } from './manifest'
 import type { SelectedContext } from './context'
 
 export interface FabricPart { path: string; payload: string; payloadType: string }
 export interface PublishedMeasure { name: string; table: string; expression: string }
 export interface PublishedColumn { name: string; table: string }
+export interface PublishedPageMap {
+  name: string
+  visuals: string[]
+  slicers: string[]
+}
+
 export interface PublishedSchema {
   modelHash: string
+  /** Descrição do modelo escrita no TMDL. Em modelos bem documentados carrega as regras de arquitetura. */
+  modelDescription: string
   measures: PublishedMeasure[]
   columns: PublishedColumn[]
   relationships: string[]
   pages: string[]
+  /** O que cada página mostra e com quais filtros — é o que responde "o que tem nessa tela". */
+  reportMap: PublishedPageMap[]
   visualCount: number
   visuals: { page: string; type: string; fields: string[] }[]
 }
@@ -78,6 +88,48 @@ function projectedFields(visual: Record<string, unknown>): string[] {
   return fields.slice(0, 8)
 }
 
+/** Valor padrão de um slicer: vive no filtro embutido de `objects.general` do próprio visual. */
+function slicerDefaults(visualNode: Record<string, unknown> | undefined): string[] {
+  const objects = visualNode?.objects as Record<string, unknown> | undefined
+  const general = objects?.general as { properties?: { filter?: { filter?: { Where?: unknown[] } } } }[] | undefined
+  const where = general?.[0]?.properties?.filter?.filter?.Where
+  if (!Array.isArray(where)) return []
+  const values: string[] = []
+  for (const node of where) {
+    const inNode = (node as { Condition?: { In?: { Values?: unknown[][] } } })?.Condition?.In
+    if (!Array.isArray(inNode?.Values)) continue
+    for (const group of inNode.Values) {
+      if (!Array.isArray(group)) continue
+      for (const entry of group) {
+        const raw = (entry as { Literal?: { Value?: string } })?.Literal?.Value
+        if (typeof raw === 'string') {
+          const clean = raw.replace(/^'|'$/g, '').trim()
+          if (clean && clean !== 'null') values.push(clean)
+        }
+      }
+    }
+  }
+  return [...new Set(values)].slice(0, 6)
+}
+
+/** Um visual comum vira uma linha legível: "card: [Receita]". */
+function describeVisual(type: string, fields: string[]): string {
+  if (!fields.length) return ''
+  const short = type.replace(/[0-9A-F]{16,}$/i, '') || 'visual'
+  return `${short}: ${fields.join(', ')}`
+}
+
+/** Bloco de comentários `///` que precede a declaração — é a descrição no TMDL. */
+function tmdlDescription(text: string, max = 4000): string {
+  const doc: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (trimmed.startsWith('///')) { doc.push(trimmed.replace(/^\/\/\/\s?/, '')); continue }
+    if (doc.length || trimmed) break
+  }
+  return doc.join('\n').trim().slice(0, max)
+}
+
 /** Parse only semantic metadata. Never pass partitions, M queries or connections to the LLM. */
 export function parsePublishedSchema(modelParts: FabricPart[], reportParts: FabricPart[] = []): PublishedSchema {
   if (modelParts.length > 200 || reportParts.length > 1000) throw new PublishedSchemaError('Definição Fabric grande demais.')
@@ -89,9 +141,19 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
   const visuals: PublishedSchema['visuals'] = []
   const hash = createHash('sha256')
   let visualCount = 0
+  let modelDescription = ''
   for (const part of modelParts) {
-    if (!/^definition\/tables\/[^/]+\.tmdl$/.test(part.path) && part.path !== 'definition/relationships.tmdl') continue
+    const arquivoDoModelo = part.path === 'definition/model.tmdl'
+    if (!/^definition\/tables\/[^/]+\.tmdl$/.test(part.path)
+      && part.path !== 'definition/relationships.tmdl' && !arquivoDoModelo) continue
     const text = decode(part)
+    // ATENÇÃO: o model.tmdl NÃO entra no hash. Incluí-lo aqui muda o hash de todo
+    // modelo e invalida qualquer manifesto já registrado — o hash precisa ser
+    // estável entre versões deste parser. Só o que define estrutura é hasheado.
+    if (arquivoDoModelo) {
+      modelDescription = safeMetadataText(tmdlDescription(text), 4000)
+      continue
+    }
     hash.update(part.path).update('\0').update(text).update('\0')
     if (part.path === 'definition/relationships.tmdl') {
       for (const block of text.split(/(?=^relationship\s+)/m).filter((value) => value.startsWith('relationship '))) {
@@ -116,21 +178,43 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
       } catch { /* A malformed page cannot change model access. */ }
     }
   }
+  const pageMap = new Map<string, { visuals: string[]; slicers: string[] }>()
   for (const part of reportParts) {
     const visualMatch = /^definition\/pages\/([^/]+)\/visuals\/[^/]+\/visual\.json$/.exec(part.path)
-    if (visualMatch) {
-      try {
-        const visual = JSON.parse(decode(part)) as Record<string, unknown>
-        const fields = projectedFields(visual)
-        const type = safeText((visual.visual as Record<string, unknown> | undefined)?.visualType, 50)
-        visualCount++
-        if (fields.length) visuals.push({ page: pageNames.get(visualMatch[1]) ?? visualMatch[1], type, fields })
-      } catch { /* Only safe metadata is retained. */ }
-    }
+    if (!visualMatch) continue
+    try {
+      const visual = JSON.parse(decode(part)) as Record<string, unknown>
+      const visualNode = visual.visual as Record<string, unknown> | undefined
+      const fields = projectedFields(visual)
+      const type = safeText(visualNode?.visualType, 50)
+      visualCount++
+      const page = pageNames.get(visualMatch[1]) ?? visualMatch[1]
+      if (fields.length) visuals.push({ page, type, fields })
+      const entry = pageMap.get(page) ?? { visuals: [], slicers: [] }
+      if (/^slicer/i.test(type)) {
+        const defaults = slicerDefaults(visualNode)
+        const group = safeText((visualNode?.syncGroup as { groupName?: string } | undefined)?.groupName, 60)
+        for (const field of fields) {
+          const shown = defaults.length ? `${field} = ${defaults.join(' / ')}` : field
+          entry.slicers.push(group ? `${shown} (sincronizado: ${group})` : shown)
+        }
+      } else {
+        const line = describeVisual(type, fields)
+        if (line) entry.visuals.push(line)
+      }
+      pageMap.set(page, entry)
+    } catch { /* Only safe metadata is retained. */ }
   }
+  const reportMap: PublishedPageMap[] = [...new Set([...pages, ...pageMap.keys()])]
+    .map((name) => ({
+      name,
+      visuals: [...new Set(pageMap.get(name)?.visuals ?? [])].slice(0, 14),
+      slicers: [...new Set(pageMap.get(name)?.slicers ?? [])].slice(0, 14),
+    }))
+    .filter((page) => page.visuals.length || page.slicers.length)
   if (!measures.length || !modelColumns.length) throw new PublishedSchemaError('O Fabric não devolveu medidas e colunas do modelo.')
-  return { modelHash: hash.digest('hex'), measures, columns: modelColumns,
-    relationships: relationships.slice(0, 50), pages: pages.slice(0, 100), visualCount, visuals }
+  return { modelHash: hash.digest('hex'), modelDescription, measures, columns: modelColumns,
+    relationships: relationships.slice(0, 50), pages: pages.slice(0, 100), reportMap, visualCount, visuals }
 }
 
 export function assertPublishedCatalog(manifest: BiManifest, published: PublishedSchema, checkHash = true): void {
@@ -173,18 +257,28 @@ export function withPublishedSchema(context: SelectedContext, manifest: BiManife
       .map((item) => `${item.table}[${item.name}]`),
     relationships: published.relationships.slice(0, 12),
     pages: published.pages.length ? published.pages.slice(0, 12) : context.pages,
-    publishedVisuals: published.visuals.filter((visual) => visual.fields.some((field) =>
+    // `?.` é obrigatório: o cache de módulo do publishedSchema pode devolver um
+    // objeto no formato antigo (sem reportMap), e um TypeError aqui viraria
+    // "Fabric indisponível" — mensagem que esconde o problema real.
+    reportMap: published.reportMap?.length ? published.reportMap.map((page) => {
+      const parts: string[] = []
+      if (page.visuals?.length) parts.push(`mostra: ${page.visuals.slice(0, 8).join(' | ')}`)
+      if (page.slicers?.length) parts.push(`filtros: ${page.slicers.slice(0, 8).join(' | ')}`)
+      return parts.length ? `${page.name} — ${parts.join(' · ')}` : ''
+    }).filter(Boolean).slice(0, 20) : context.reportMap,
+    publishedVisuals: (published.visuals ?? []).filter((visual) => visual.fields.some((field) =>
       context.measures.some((measure) => field.endsWith(`[${measure.name}]`)))).slice(0, 8)
       .map((visual) => `${visual.page}: ${visual.type} (${visual.fields.join(', ')})`),
     source: 'Definição atual do modelo e relatório publicados no Fabric',
   }
-  while (JSON.stringify(result).length > 22_000) {
+  while (JSON.stringify(result).length > 34_000) {
     const formula = result.measures.findLast((item) => item.publishedExpression)
     if (formula) { formula.publishedExpression = undefined; continue }
     if (result.availableDimensions.length) result.availableDimensions.pop()
     else if (result.availableMeasures.length) result.availableMeasures.pop()
-    else if (result.pages.length) result.pages.pop()
     else if (result.publishedVisuals?.length) result.publishedVisuals.pop()
+    else if (result.reportMap.length > 3) result.reportMap.pop()
+    else if (result.pages.length) result.pages.pop()
     else break
   }
   return result

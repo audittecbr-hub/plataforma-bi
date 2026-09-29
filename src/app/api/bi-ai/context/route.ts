@@ -10,7 +10,7 @@ export async function GET(request: Request): Promise<Response> {
     const dashboardId = new URL(request.url).searchParams.get('dashboardId') ?? ''
     const { dashboard } = await authorizedDashboard(dashboardId)
     try {
-      const manifest = manifestForDashboard(dashboard)
+      const manifest = await manifestForDashboard(dashboard)
       const config = await lerConfigIa()
       const ready = config.enabled && await providerReady()
       return Response.json({

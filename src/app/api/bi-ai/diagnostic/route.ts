@@ -10,7 +10,7 @@ export async function GET(request: Request): Promise<Response> {
     const dashboardId = new URL(request.url).searchParams.get('dashboardId') ?? ''
     const { dashboard, profile } = await authorizedDashboard(dashboardId)
     if (profile?.is_admin !== true) throw new BiAiError(403, 'ADMIN_REQUIRED', 'Diagnóstico disponível somente para administradores.')
-    const manifest = manifestForDashboard(dashboard)
+    const manifest = await manifestForDashboard(dashboard)
     if (!process.env.POWERBI_TENANT || !process.env.POWERBI_CLIENT_ID || !process.env.POWERBI_CLIENT_SECRET) {
       return Response.json({ ok: false, code: 'ENTRA_MISSING', detail: 'Credenciais Entra ausentes.' }, { status: 503 })
     }

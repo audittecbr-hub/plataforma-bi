@@ -244,13 +244,13 @@ export function IaTab({ initial }: { initial: Snapshot }) {
 
     <Panel>
       <PanelHeader icon={ShieldCheck} eyebrow="Por relatório" title="Chat IA nos dashboards"
-        description="Ative somente relatórios com vínculo e manifesto válidos. O diagnóstico faz uma consulta mínima ao modelo Power BI." />
+        description="Ative relatórios vinculados ao Power BI. Sem manifesto, o catálogo é lido ao vivo do modelo e do Fabric." />
       <div className="space-y-3 border-t px-5 py-5 md:px-6">
         <Input type="search" value={dashboardSearch} onChange={(event) => setDashboardSearch(event.target.value)} placeholder="Buscar dashboard…" aria-label="Buscar dashboard" className="max-w-sm" />
         <div className="max-h-[32rem] divide-y overflow-y-auto rounded-[8px] border">
           {visibleDashboards.map((dashboard) => <div key={dashboard.id} className="flex flex-col gap-2 p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="min-w-0"><p className="truncate text-sm font-semibold">{dashboard.name}</p><p className="text-xs text-muted-foreground">{dashboard.manifestVersion ? `Manifesto ${dashboard.manifestVersion}` : dashboard.linked ? dashboard.workspaceLinked ? 'Aguardando manifesto' : 'Dataset vinculado; workspace e manifesto pendentes' : 'Sem vínculo Power BI'}{dashboard.syncedAt && ` · sincronizado ${new Date(dashboard.syncedAt).toLocaleDateString('pt-BR')}`}</p></div>
-            <div className="flex items-center gap-2"><Button type="button" size="sm" variant="ghost" onClick={() => diagnoseDashboard(dashboard.id)} disabled={!!busy || !dashboard.manifestVersion}>Diagnóstico</Button><Switch checked={dashboard.enabled} onCheckedChange={(next) => changeDashboard(dashboard.id, next)} disabled={!!busy || !initial.migrationReady || (!dashboard.manifestVersion && !dashboard.enabled)} aria-label={`Ativar IA para ${dashboard.name}`} /></div>
+            <div className="min-w-0"><p className="truncate text-sm font-semibold">{dashboard.name}</p><p className="text-xs text-muted-foreground">{dashboard.manifestVersion ? `Manifesto ${dashboard.manifestVersion}` : dashboard.linked ? dashboard.workspaceLinked ? 'Catálogo ao vivo disponível para ativação' : 'Dataset vinculado; workspace pendente' : 'Sem vínculo Power BI'}{dashboard.syncedAt && ` · sincronizado ${new Date(dashboard.syncedAt).toLocaleDateString('pt-BR')}`}</p></div>
+            <div className="flex items-center gap-2"><Button type="button" size="sm" variant="ghost" onClick={() => diagnoseDashboard(dashboard.id)} disabled={!!busy || !dashboard.enabled || !dashboard.linked || !dashboard.workspaceLinked}>Diagnóstico</Button><Switch checked={dashboard.enabled} onCheckedChange={(next) => changeDashboard(dashboard.id, next)} disabled={!!busy || !initial.migrationReady || (!dashboard.linked || !dashboard.workspaceLinked) && !dashboard.enabled} aria-label={`Ativar IA para ${dashboard.name}`} /></div>
           </div>)}
         </div>
         <p className="flex items-center gap-2 text-xs text-muted-foreground"><CheckCircle2 className="size-3.5" /> Os IDs Power BI são resolvidos no servidor a partir do dashboard selecionado.</p>

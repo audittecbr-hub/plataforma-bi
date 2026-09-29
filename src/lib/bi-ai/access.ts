@@ -4,6 +4,7 @@ import { createClient } from '@/utils/supabase/server'
 import { createAdminClient } from '@/utils/supabase/admin'
 import { dashboardAccessDecision, montarContextoUsuario, type PerfilParaContexto } from '@/lib/permissions'
 import { UUID } from './manifest'
+import { ErroProvedor } from '@/lib/llm'
 
 export class BiAiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -56,6 +57,13 @@ export async function authorizedDashboard(dashboardId: string) {
 
 export function apiError(error: unknown): Response {
   if (error instanceof BiAiError) return Response.json({ error: error.message, code: error.code }, { status: error.status })
+  if (error instanceof ErroProvedor) {
+    return Response.json({ error: error.message, code: 'AI_PROVIDER_ERROR' },
+      { status: error.status === 429 ? 429 : 502 })
+  }
+  if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+    return Response.json({ error: 'A consulta demorou demais. Tente novamente.', code: 'TIMEOUT' }, { status: 504 })
+  }
   console.error('[bi-ai] unexpected:', error)
   return Response.json({ error: 'Falha temporária no Chat IA.', code: 'INTERNAL_ERROR' }, { status: 500 })
 }

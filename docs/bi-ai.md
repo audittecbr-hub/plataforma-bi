@@ -3,8 +3,9 @@
 ## Fluxo e dados
 
 `DashboardSelector.currentDashboard.id` → `dashboards.id` →
-`dashboards.dataset_id` + `workspace_id` + `report_id` → `ai_manifest` →
-seleção determinística de medidas, dimensões e exemplos → plano JSON →
+`dashboards.dataset_id` + `workspace_id` + `report_id` → manifesto curado,
+quando existe, ou catálogo ao vivo de `INFO.VIEW.*` e da definição Fabric →
+seleção dos objetos relevantes com inspeção do catálogo completo → plano JSON →
 guarda DAX → REST Execute Queries → explicação conferida.
 
 O navegador envia somente `dashboardId`, `conversationId` e `message`. O
@@ -23,7 +24,9 @@ original e revalida o acesso ao mesmo dashboard; um token cifrado de 30 minutos
 liga essa continuação ao usuário e à conversa. O planejador também pode pedir
 um esclarecimento para ambiguidades de negócio que o catálogo não resolve. Há
 limite de duas rodadas; sem dados suficientes, o Chat informa a limitação em vez
-de escolher silenciosamente uma métrica ou um recorte.
+de escolher silenciosamente uma métrica ou um recorte. O token usa
+`BI_AI_ENCRYPTION_KEY` quando configurada; na ausência dela, deriva uma chave
+distinta da credencial de serviço do Supabase, somente no servidor.
 
 ### Escopo semântico e consultas certificadas
 
@@ -40,14 +43,15 @@ Outros, Fundo de Marketing e provisão por operação. A receita de Fundo separa
 descontada das operações do resultado próprio do departamento, calculado como
 receita própria mais despesa própria já negativa. O resultado geral das seis
 operações não é usado como substituto. A consulta por operação exclui a linha
-em branco da dimensão para preservar as seis operações. Se um recorte nomeado ainda não tiver
-consulta validada, o Chat informa a limitação.
+em branco da dimensão para preservar as seis operações. Perguntas fora dessas
+receitas seguem para planejamento DAX sobre o mesmo modelo.
 
 Perguntas comuns podem ter também `queryExamples` com DAX revisado. Quando a
 pergunta corresponde exatamente a um exemplo, o servidor valida e executa esse
 DAX. Nas demais perguntas, o planejador recebe nomes do catálogo completo,
-detalhes dos objetos relevantes e regras de negócio; só pode usar medidas e
-dimensões autorizadas e a consulta passa pela guarda DAX antes de executar.
+detalhes dos objetos relevantes e regras de negócio; pode usar todas as
+tabelas, colunas e medidas analíticas do modelo vinculado ao dashboard. A
+consulta passa pela guarda DAX antes de executar.
 O manifesto preserva `whenToUse` e `whenNotToUse` das medidas para distinguir
 um componente de uma métrica do próprio assunto perguntado.
 
@@ -59,8 +63,9 @@ verificada com Operações: 14 tabelas, 37 medidas, 89 colunas, seis relações,
 sete páginas e 75 visuais no modelo publicado. O servidor extrai nomes,
 relações, fórmulas DAX curtas e referências dos visuais; não envia partições,
 M queries, strings de conexão ou recursos do relatório ao modelo de IA. Os
-objetos autorizados continuam definidos pelo manifesto para preservar as
-restrições de acesso. Se o modelo publicado perder uma medida ou coluna usada
+objetos disponíveis vêm do modelo vinculado ao dashboard que o usuário já pode
+abrir. Isso inclui colunas ocultas, tabelas técnicas e identificadores de
+detalhe; medidas HTML/CSS são apenas de apresentação. Se o modelo publicado perder uma medida ou coluna usada
 no contexto, o Chat recusa a resposta. No registro, o Portal grava no
 manifesto o hash da definição publicada; se o modelo mudar depois, o Chat
 interrompe respostas até uma nova verificação e registro. A leitura da definição
@@ -111,11 +116,12 @@ serviço, sem depender de login Microsoft por usuário.
    OpenAI continuam disponíveis em `src/lib/llm.ts`.
 
 Na aba IA, o administrador pode ativar/desativar o Chat globalmente, cada
-provedor, modelos descobertos pela API e dashboards com manifesto válido;
+provedor, modelos descobertos pela API e dashboards com vínculo Power BI;
 selecionar o modelo exato, testar a conexão, ajustar nível de raciocínio onde
 o adaptador suporta e limites de tokens de planejamento e resposta. Para
-OpenCode Go, o nível fica no padrão do modelo; DeepSeek aceita
-`none/low/medium/high/max`; OpenAI e Anthropic expõem níveis apenas para
+OpenCode Go, o nível fica no padrão do modelo; DeepSeek permite desativar o
+raciocínio ou usar `low/high/max` (`medium` é mapeado para `high` pela API).
+OpenAI e Anthropic expõem níveis apenas para
 famílias de modelos suportadas. O teste de conexão faz uma chamada pequena ao
 provedor e pode consumir tokens da conta configurada.
 No OpenCode Go, o Portal escolhe Chat Completions, Messages ou Responses de
@@ -128,16 +134,19 @@ para os modelos `-free`. Os dois gratuitos presentes na conta em 28/09/2026,
 `space-bunny-free` e `longcat-2.5-preview-free`, responderam a testes pequenos
 no endpoint Chat Completions. A disponibilidade gratuita é temporária segundo
 a [documentação do Go](https://dev.opencode.ai/docs/go/).
-Em um smoke test com o manifesto de Operações e consultas reais ao Power BI,
-`longcat-2.5-preview-free` respondeu a uma pergunta de total e a uma pergunta
-por operação, com todos os números conferidos. `space-bunny-free` passou no
-total, mas falhou ao gerar JSON válido para a pergunta por operação; por isso
-o padrão de teste passou a ser LongCat.
+Em testes locais com Operações, `longcat-2.5-preview-free` gerou DAX para uma
+comparação por operação; o servidor executou a consulta no Fabric, descartou
+o grupo sem nome e exibiu as seis operações na ordem pedida. O modelo gratuito
+pode consumir seu limite de saída no raciocínio; o prompt do planejador usa um
+catálogo inicial compacto e permite inspeção adicional de qualquer objeto.
 Na verificação de 28/09/2026, a chave antiga da cópia de configuração local
 autenticou nos endpoints Messages e Responses do OpenCode Go, mas ambos
 retornaram `GoUsageLimitError` (HTTP 429). A resposta completa desses dois
 formatos permanece sem teste real nesta conta até a renovação da cota. O
-DeepSeek direto e os demais provedores não dependem do OpenCode Go.
+DeepSeek direto e os demais provedores não dependem do OpenCode Go. Para
+DeepSeek V4.1 Flash direto, escolha `DeepSeek (direto)` e modelo
+`deepseek-flash`. A conta DeepSeek precisa ter saldo; um teste em 29/09/2026
+retornou HTTP 402 por saldo insuficiente.
 O [OpenCode Go](https://dev.opencode.ai/docs/go/) descreve seu serviço como
 voltado principalmente a agentes de código; confirme com o operador se ele é
 adequado para perguntas de BI antes de escolhê-lo como provedor global.
@@ -195,19 +204,28 @@ objetos indexados por nome em `model.tables`/`model.measures`.
 ```
 
 O exemplo usa marcadores em vez de UUIDs válidos: substitua todos antes de
-registrar. Marque tabelas técnicas com `queryable: false`, medidas HTML/CSS com
-`presentationOnly: true` e identificadores sensíveis com `restricted: true`.
+registrar. O acesso aos dados é definido pela autorização do dashboard:
+depois dela, o Chat pode consultar todas as tabelas e colunas do modelo,
+incluindo identificadores e campos ocultos. Medidas HTML/CSS são classificadas
+como `presentationOnly` para não serem interpretadas como valores de negócio.
 O contrato 2.x também aceita `preferred`, `queryable`, `semanticRole`,
 `queryPolicy.defaultMaxRows`, `report.pages[].mainVisuals` e ambiguidades
 estruturadas. `source.registrationReady: false` bloqueia registro e uso do Chat
 enquanto o modelo publicado divergir do PBIP local.
-Campos restritos ficam bloqueados; um administrador só pode consultá-los se o
-manifesto definir explicitamente `queryPolicy.allowRestrictedForAdmins: true`.
-Agregação direta de coluna exige
-`queryPolicy.allowDirectColumnAggregation: true` **e** `aggregatable: true` na
-coluna. Medidas oficiais têm prioridade.
+Flags antigas de restrição de coluna do manifesto são normalizadas pelo parser
+para acesso completo ao modelo vinculado. Colunas numéricas podem ser agregadas
+diretamente; medidas oficiais continuam preferidas quando representam a regra
+de negócio pedida.
 
-## Registro de um novo PBIP
+## Ativação de outro dashboard
+
+Na aba Administração → IA, um dashboard com `workspace_id` e `dataset_id`
+válidos pode ser ativado sem preparar um manifesto PBIP. O servidor lê o
+catálogo `INFO.VIEW.*` e a definição publicada no Fabric, verifica os objetos
+e passa a usá-los nas consultas. Quando houver um manifesto curado, ele fornece
+descrições, exemplos e regras certificadas adicionais.
+
+## Registro opcional de manifesto curado
 
 O script do PBIP gera JSON até 1 MB e chama `POST /api/bi-ai/register` com o
 header `x-portal-ai-registration-secret`. O corpo pode ser o manifesto direto
@@ -230,11 +248,14 @@ pelo operador.
 | `GET /api/bi-ai/history?dashboardId=...` | Conversas do usuário neste dashboard; `conversationId` opcional para mensagens |
 | `GET /api/bi-ai/diagnostic?dashboardId=...` | Apenas admin; lista modelos e executa `EVALUATE ROW("ok", 1)` |
 
-O Chat limita mensagem a 500 caracteres, contexto a 18 mil caracteres,
-resultado comum a 100 linhas (até 500 se o manifesto permitir detalhamento),
-três consultas normais ou cinco explicativas e resposta a 3.500 caracteres.
-DAX só pode usar objetos selecionados e autorizados do manifesto; detalhamento
-exige `TOPN` sobre `SUMMARIZECOLUMNS`. Números escritos pela IA são conferidos
+O Chat limita cada mensagem a 500 caracteres, cada plano a até 12 consultas e
+cada resultado a até 500 linhas, conforme o manifesto. O planejador pode
+inspecionar objetos adicionais do catálogo completo e reparar consultas DAX
+recusadas pelo Power BI. A rota admite até 300 segundos por solicitação; cada
+chamada ao provedor tem limite de tempo próprio. Esses limites evitam loops e
+respeitam as cotas da Microsoft e do provedor de IA.
+DAX pode usar qualquer objeto analítico do modelo vinculado, com saída `ROW`
+ou `TOPN` limitada. Números escritos pela IA são conferidos
 contra as linhas do Power BI; se essa conferência falhar, o servidor apresenta
 um resumo literal e curto do resultado.
 
