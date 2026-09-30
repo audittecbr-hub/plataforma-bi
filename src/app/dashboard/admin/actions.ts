@@ -493,7 +493,7 @@ export async function refreshDashboards(names: string[]) {
 
                 // Grava log de sucesso ou falha no Supabase
                 await supabase.from('automation_logs').insert({
-                    event_type: ok ? 'job_success' : 'job_error',
+                    event_type: ok ? 'job_requested' : 'job_error',
                     details: { job: 'pbi_refresh_dashboards', dashboard: name },
                 })
             } catch (e) {
@@ -525,7 +525,7 @@ export async function getPowerBIRefreshLogs() {
         const { data, error } = await supabase
             .from('automation_logs')
             .select('*')
-            .in('event_type', ['job_success', 'job_error'])
+            .in('event_type', ['job_requested', 'job_success', 'job_error'])
             .or(`details->>job.eq.pbi_refresh_dashboards,details->>job.eq.pbi_refresh_dashboards`)
             .filter('details->>job', 'eq', 'pbi_refresh_dashboards')
             .order('created_at', { ascending: false })

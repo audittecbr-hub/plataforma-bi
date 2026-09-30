@@ -6,7 +6,7 @@
 // Mapeamento de nome amigável → ID do dataset no Power BI
 export const PBI_DATASETS: Record<string, string> = {
     'Composição de Receitas': '26873b5b-7e88-48b9-8a23-e504178fcf8a',
-    'Geral (Metas)': '5f1e9f0f-8388-438d-a0be-6a5e13bb3ce4',
+    'Geral (Metas)': '72edf515-6d51-4fb9-ad43-be8b77c85604',
     'Painel de Unidades': 'f476a231-a82f-405d-b0e5-1a4147e172ca',
     'Painel a Receber': '97104bd3-fa7f-4a40-94f8-4989254e7f48',
     'Painel de Inadimplência': '92174395-c9b1-4b2c-b491-137fff6bb634',
