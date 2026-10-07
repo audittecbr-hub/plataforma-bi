@@ -8,12 +8,13 @@ import { Hint } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
 const STORAGE_KEY = "sidebar-collapsed"
-const LARGURA_ABERTA = "w-[272px]"
+const LARGURA_ABERTA = "w-[304px] xl:w-[320px]"
 const LARGURA_FECHADA = "w-[76px]"
 
-const SidebarContext = createContext<{ collapsed: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{ collapsed: boolean; toggle: () => void; expand: () => void }>({
   collapsed: false,
   toggle: () => {},
+  expand: () => {},
 })
 
 /** Estado de recolhimento para os filhos client (ex.: ligar tooltips quando recolhida). */
@@ -64,6 +65,15 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
     })
   }, [])
 
+  const expand = useCallback(() => {
+    setEstado((atual) => ({ ...atual, collapsed: false }))
+    try {
+      window.localStorage.setItem(STORAGE_KEY, 'false')
+    } catch {
+      // O menu continua utilizável mesmo sem persistência.
+    }
+  }, [])
+
   // Atalho "[" (fora de campos de texto) — o mesmo de Linear e Figma.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -77,7 +87,7 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
   }, [toggle])
 
   return (
-    <SidebarContext.Provider value={{ collapsed, toggle }}>
+    <SidebarContext.Provider value={{ collapsed, toggle, expand }}>
       <div
         data-collapsed={collapsed}
         className={cn(

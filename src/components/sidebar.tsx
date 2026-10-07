@@ -11,9 +11,7 @@ interface SidebarProps {
 export async function Sidebar({ user }: SidebarProps) {
   return (
     <SidebarShell>
-      <div className="flex-1 overflow-y-auto overflow-x-hidden">
-        <SidebarNav isAdmin={user.isAdmin} />
-      </div>
+      <SidebarNav />
       <SidebarUser user={user} signOutAction={signOut} />
     </SidebarShell>
   )

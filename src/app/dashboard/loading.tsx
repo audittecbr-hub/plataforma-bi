@@ -12,8 +12,6 @@ export default function DashboardLoading() {
         <Skeleton className="hidden h-16 w-52 rounded-2xl md:block" />
       </div>
 
-      <Skeleton className="h-12 w-full max-w-3xl rounded-2xl" />
-
       <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-md">
         <div className="flex items-center justify-between gap-4 border-b border-border/70 px-4 py-3">
           <div className="flex gap-4">
