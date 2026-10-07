@@ -4,10 +4,11 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
 import { useTheme } from "next-themes"
-import { CornerDownLeft, LogOut, Monitor, Moon, Search, SearchX, Sun, type LucideIcon } from "lucide-react"
+import { ChartColumnBig, CornerDownLeft, LogOut, Monitor, Moon, Search, SearchX, Sun, type LucideIcon } from "lucide-react"
 
 import { BrandSeal } from "@/components/brand/logo"
 import { COMMAND_MENU_EVENT } from "@/components/topbar"
+import { useDashboardNavigation } from "@/components/dashboard-navigation-provider"
 import { overlayClasses } from "@/components/ui/dialog"
 import { Kbd } from "@/components/ui/kbd"
 import { ADMIN_SECTIONS, NAV_ITEMS } from "@/lib/navigation"
@@ -41,6 +42,7 @@ interface CommandMenuProps {
 export function CommandMenu({ isAdmin, signOutAction }: CommandMenuProps) {
   const [open, setOpen] = useState(false)
   const router = useRouter()
+  const { catalog, selectDashboard } = useDashboardNavigation()
   const { setTheme } = useTheme()
   const [, startSignOut] = useTransition()
 
@@ -62,6 +64,22 @@ export function CommandMenu({ isAdmin, signOutAction }: CommandMenuProps) {
 
   const commands = useMemo<Command[]>(() => {
     const go = (href: string) => () => router.push(href)
+    const reports = new Map<string, Command>()
+    for (const area of catalog.areas) {
+      for (const section of area.sections) {
+        for (const dashboard of section.dashboards) {
+          if (reports.has(dashboard.id)) continue
+          reports.set(dashboard.id, {
+            id: `report:${dashboard.id}`,
+            group: 'Relatórios',
+            label: dashboard.name,
+            hint: `${area.label}${section.label !== 'Visão geral' ? ` · ${section.label}` : ''}`,
+            icon: ChartColumnBig,
+            run: () => selectDashboard(area.id, section.id, dashboard.id),
+          })
+        }
+      }
+    }
     return [
       ...NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin).map((item) => ({
         id: `nav:${item.href}`,
@@ -71,6 +89,7 @@ export function CommandMenu({ isAdmin, signOutAction }: CommandMenuProps) {
         icon: item.icon,
         run: go(item.href),
       })),
+      ...reports.values(),
       ...(isAdmin
         ? ADMIN_SECTIONS.map((section) => ({
             id: `admin:${section.tab}`,
@@ -123,7 +142,7 @@ export function CommandMenu({ isAdmin, signOutAction }: CommandMenuProps) {
           }),
       },
     ]
-  }, [isAdmin, router, setTheme, signOutAction])
+  }, [catalog, isAdmin, router, selectDashboard, setTheme, signOutAction])
 
   const run = (command: Command) => {
     setOpen(false)
@@ -144,7 +163,7 @@ export function CommandMenu({ isAdmin, signOutAction }: CommandMenuProps) {
         >
           <DialogPrimitive.Title className="sr-only">Paleta de comandos</DialogPrimitive.Title>
           <DialogPrimitive.Description className="sr-only">
-            Busque uma página, seção ou ação e pressione Enter para executar.
+            Busque um relatório, página ou ação e pressione Enter para executar.
           </DialogPrimitive.Description>
           {/* O conteúdo remonta a cada abertura: busca e seleção começam do zero. */}
           <CommandPalette commands={commands} onRun={run} />
@@ -214,7 +233,7 @@ function CommandPalette({ commands, onRun }: { commands: Command[]; onRun: (comm
             setActive(0)
           }}
           onKeyDown={onKeyDown}
-          placeholder="Buscar páginas, seções e ações…"
+          placeholder="Buscar relatórios, páginas e ações…"
           role="combobox"
           aria-expanded="true"
           aria-controls="command-list"

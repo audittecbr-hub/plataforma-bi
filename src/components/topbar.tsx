@@ -7,6 +7,7 @@ import { ChevronRight, Search } from "lucide-react"
 
 import { BrandLogo, BrandSeal } from "@/components/brand/logo"
 import { MobileNav } from "@/components/mobile-nav"
+import { useDashboardNavigation } from "@/components/dashboard-navigation-provider"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -38,12 +39,13 @@ function AdminCrumb() {
 
 function Breadcrumb() {
   const pathname = usePathname()
+  const { selection, isDashboardPage } = useDashboardNavigation()
   const atual = NAV_ITEMS.find((item) => item.href === pathname)
   const isAdmin = pathname === "/dashboard/admin"
 
   return (
     <nav aria-label="Trilha de navegação" className="hidden min-w-0 lg:block">
-      <ol className="flex items-center gap-2 text-sm">
+      <ol className="flex min-w-0 items-center gap-2 text-sm">
         <li>
           <Link href="/dashboard" className="font-medium text-muted-foreground transition-colors hover:text-foreground">
             Grupo Studio
@@ -61,6 +63,12 @@ function Breadcrumb() {
           <Suspense fallback={null}>
             <AdminCrumb />
           </Suspense>
+        )}
+        {isDashboardPage && selection && (
+          <>
+            <li aria-hidden className="hidden xl:block"><ChevronRight className="size-3.5 text-faint" /></li>
+            <li className="hidden max-w-40 truncate text-muted-foreground xl:block" title={selection.area.label}>{selection.area.label}</li>
+          </>
         )}
       </ol>
     </nav>

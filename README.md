@@ -16,6 +16,25 @@ npm run dev
 
 Abra <http://localhost:3000>. Antes de subir, rode `npm run lint` e `npm run build`.
 
+### Navegação de relatórios
+
+O portal abre com a saudação e uma tela de boas-vindas. Ao escolher um relatório,
+o cabeçalho passa a mostrar seu nome, área, subárea, tipo e posição na lista.
+Links diretos abrem o relatório correspondente, sem passar pela saudação.
+
+Áreas, subáreas e relatórios ficam no menu lateral em cascata. Clique na área,
+abra a subárea e escolha o relatório; áreas sem subdivisões mostram os
+relatórios diretamente. A busca no menu aceita nomes de áreas, subáreas e
+projetos, inclusive sem acentos. `Ctrl+K` também encontra os relatórios.
+No celular, a mesma cascata está no botão de menu e fecha ao escolher um painel.
+Configurações e Administração ficam no menu da conta, aberto pelo nome ou avatar
+no rodapé. A opção de Administração aparece apenas para administradores.
+
+O caminho selecionado é salvo na URL (`area`, `subarea`, `report`), permitindo
+compartilhar links e usar voltar/avançar. A hierarquia é montada no servidor com
+as permissões existentes; links para IDs indisponíveis voltam a um relatório
+autorizado. Valide esses comportamentos com `npm test`.
+
 ### Variáveis de ambiente
 
 Crie um `.env.local` (não versionado) com:

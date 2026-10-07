@@ -1,74 +1,50 @@
 "use client"
 
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { motion } from "framer-motion"
-import { cn } from "@/lib/utils"
-import { NAV_ITEMS, isNavActive } from "@/lib/navigation"
-import { Hint } from "@/components/ui/tooltip"
-import { useSidebar } from "@/components/sidebar-shell"
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { DashboardTree } from '@/components/dashboard-tree'
+import { useDashboardNavigation } from '@/components/dashboard-navigation-provider'
+import { useSidebar } from '@/components/sidebar-shell'
+import { Hint } from '@/components/ui/tooltip'
+import { NAV_ITEMS, isNavActive } from '@/lib/navigation'
+import { cn } from '@/lib/utils'
 
 interface SidebarNavProps {
-  isAdmin?: boolean
+  mobile?: boolean
+  onNavigate?: () => void
 }
 
-export function SidebarNav({ isAdmin }: SidebarNavProps) {
+export function SidebarNav({ mobile = false, onNavigate }: SidebarNavProps) {
   const pathname = usePathname()
-  const { collapsed } = useSidebar()
+  const sidebar = useSidebar()
+  const { isDashboardPage } = useDashboardNavigation()
+  const collapsed = !mobile && sidebar.collapsed
 
-  const portal = NAV_ITEMS.filter((item) => !item.adminOnly)
-  const gestao = isAdmin ? NAV_ITEMS.filter((item) => item.adminOnly) : []
-
-  const renderGroup = (titulo: string, itens: typeof NAV_ITEMS) => (
-    <div className="space-y-1">
-      <p className="eyebrow h-6 overflow-hidden whitespace-nowrap px-[17px] text-[10px] leading-6 text-primary transition-opacity duration-200 group-data-[collapsed=true]/sidebar:opacity-0">
-        {titulo}
-      </p>
-      {itens.map((item) => {
-        const Icon = item.icon
-        const active = isNavActive(pathname, item.href)
-        return (
-          <Hint key={item.href} label={item.label} side="right" disabled={!collapsed}>
-            <Link
-              href={item.href}
-              prefetch={true}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "group/item relative flex h-10 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[14px] font-semibold outline-none",
-                "transition-colors duration-200 focus-visible:ring-[3px] focus-visible:ring-ring/25",
-                active ? "text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-            >
-              {active && (
-                <motion.span
-                  layoutId="sidebar-active"
-                  aria-hidden
-                  className="absolute inset-0 rounded-[4px] bg-white/[0.07]"
-                  transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  <span className="absolute inset-y-2 left-0 w-[3px] bg-primary" />
-                </motion.span>
-              )}
-              <Icon
-                className={cn(
-                  "relative size-[18px] shrink-0 transition-colors",
-                  active ? "text-primary" : "text-muted-foreground group-hover/item:text-foreground"
-                )}
-              />
-              <span className="relative truncate transition-opacity duration-200 group-data-[collapsed=true]/sidebar:opacity-0">
-                {item.label}
-              </span>
-            </Link>
-          </Hint>
-        )
-      })}
-    </div>
-  )
+  const renderItem = (item: (typeof NAV_ITEMS)[number]) => {
+    const Icon = item.icon
+    const active = item.href === '/dashboard' ? isDashboardPage : isNavActive(pathname, item.href)
+    return (
+      <Hint key={item.href} label={item.label} side="right" disabled={!collapsed}>
+        <Link
+          href={item.href} prefetch={true} onClick={onNavigate}
+          aria-current={active ? 'page' : undefined}
+          className={cn(
+            'group/item relative flex h-10 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+            active ? 'bg-white/[0.07] text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+          )}
+        >
+          {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary" />}
+          <Icon aria-hidden className={cn('size-[18px] shrink-0', active ? 'text-primary' : 'text-faint group-hover/item:text-foreground')} />
+          <span className={cn('truncate transition-opacity duration-200', collapsed && 'opacity-0')}>{item.label}</span>
+        </Link>
+      </Hint>
+    )
+  }
 
   return (
-    <nav aria-label="Navegação principal" className="flex flex-col gap-6 px-3 py-5">
-      {renderGroup("Portal", portal)}
-      {gestao.length > 0 && renderGroup("Gestão", gestao)}
+    <nav aria-label={mobile ? 'Navegação principal no celular' : 'Navegação principal'} className="flex min-h-0 flex-1 flex-col pt-4">
+      <div className="shrink-0 px-3">{renderItem(NAV_ITEMS[0])}</div>
+      <DashboardTree mobile={mobile} onNavigate={onNavigate} />
     </nav>
   )
 }

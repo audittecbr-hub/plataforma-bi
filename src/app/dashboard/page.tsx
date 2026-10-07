@@ -1,20 +1,11 @@
-import { createClient } from '@/utils/supabase/server'
-import { createAdminClient } from '@/utils/supabase/admin'
-import { redirect } from 'next/navigation'
-import { unstable_cache } from 'next/cache'
-import { DEPARTMENT_GROUPS } from '@/lib/constants'
-import { DepartmentView } from '@/components/department-view'
-import { CompanyOverview } from '@/components/company-overview'
-import { Dashboard } from '@/lib/types'
-import { PageHeader } from '@/components/ui/page-header'
+import { DashboardPageContent } from '@/components/dashboard-page-content'
+import { getDashboardData } from '@/lib/dashboard-data'
 import { firstName } from '@/lib/user-display'
-import { montarContextoUsuario, podeAcessarDashboard } from '@/lib/permissions'
 
 export const metadata = { title: 'Dashboards' }
-
+export const dynamic = 'force-dynamic'
 const TIMEZONE = 'America/Sao_Paulo'
 
-/** Saudação e data calculadas no fuso de Brasília — o servidor roda em UTC. */
 function saudacao(agora: Date) {
   const hora = Number(new Intl.DateTimeFormat('pt-BR', { hour: 'numeric', hourCycle: 'h23', timeZone: TIMEZONE }).format(agora))
   if (hora < 12) return 'Bom dia'
@@ -22,194 +13,20 @@ function saudacao(agora: Date) {
   return 'Boa noite'
 }
 
-/** "quinta-feira, 24 de setembro" → "Quinta-feira, 24 de setembro" (só a inicial em maiúscula). */
 function dataPorExtenso(agora: Date) {
   const texto = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TIMEZONE }).format(agora)
   return texto.charAt(0).toUpperCase() + texto.slice(1)
 }
 
-// A página permanece dinâmica porque renderiza conteúdo específico do usuário autenticado.
-// Apenas a lista de dashboards (dado não sensível, igual para todos) é cacheada separadamente.
-export const dynamic = 'force-dynamic'
-
-// Cache da lista de dashboards por 5 minutos.
-// Invalidado automaticamente via revalidateTag('dashboards') sempre que um dashboard é alterado.
-const getCachedDashboards = unstable_cache(
-    async () => {
-        const supabase = createAdminClient()
-        const { data } = await supabase
-            .from('dashboards')
-            .select('id, name, embed_url, department, allowed_departments, assigned_user_id, sub_group')
-            .order('name', { ascending: true })
-        return data ?? []
-    },
-    ['dashboards-list'],
-    { revalidate: 300, tags: ['dashboards'] }
-)
-
 export default async function DashboardPage() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
-    redirect('/login')
-  }
-
-  const [{ data: profile }, dbDashboards] = await Promise.all([
-    supabase
-      .from('profiles')
-      .select('department, allowed_sub_departments, is_admin, is_leader, full_name')
-      .eq('id', user.id)
-      .single(),
-    getCachedDashboards(),
-  ])
-
-  // Reforço da ordenação no Frontend (Garante ordem mesmo se o Cache estiver instável)
-  const sortedDashboards = dbDashboards ? [...dbDashboards].sort((a, b) => 
-    (a.name || '').trim().localeCompare((b.name || '').trim(), 'pt-BR', { sensitivity: 'base' })
-  ) : []
-
-  const permissionContext = montarContextoUsuario(user.id, profile)
-  const { department, mainUserDepartment, isDiretoria, allowedSubDepartments, isManagerOfGroup, isLeader } = permissionContext
-
-  // Group dashboards by Department Group (for Tabs)
-  const dashboardConfig: Record<string, Dashboard[]> = {}
-  const flatAccessibleDashboards: Dashboard[] = []
-
-  if (sortedDashboards && sortedDashboards.length > 0) {
-      sortedDashboards.forEach((d) => {
-          if (!podeAcessarDashboard(d, permissionContext)) return;
-
-          // Map the dashboard's specific department to its main group for TAB grouping (Directory view)
-          // For non-directory view, we just pass the list and the Selector groups it internally by sub-department.
-          
-          // Um dashboard é "individual" (Metas Líderes) se:
-          // 1. Tem assigned_user_id (dono explícito), OU
-          // 2. Tem sub_group preenchido (marcado como individual pelo admin), OU
-          // 3. Tem department === 'Metas Líderes' (legado)
-          const isIndividual = !!d.assigned_user_id || !!d.sub_group || d.department === 'Metas Líderes';
-          const relevantGroups = new Set<string>();
-
-          if (!isIndividual) {
-              // 1. Primary Group
-              relevantGroups.add(DEPARTMENT_GROUPS[d.department] || d.department);
-
-              // 2. Allowed Groups - we map them to their main groups too
-              if (d.allowed_departments) {
-                  d.allowed_departments.forEach((dept: string) => {
-                       relevantGroups.add(DEPARTMENT_GROUPS[dept] || dept);
-                  });
-              }
-          } else {
-              // Individual Dashboards (Metas Líderes)
-              // Forçamos para a tab principal de Metas Líderes para a Diretoria/Admins
-              relevantGroups.add('Metas Líderes');
-
-              // Apenas o dono do dashboard individual o ve no seu grupo original;
-              // lideres veem dashboards de subordinados somente em "Metas Lideres"
-              if (!isDiretoria && d.assigned_user_id === user.id) {
-                  relevantGroups.add(DEPARTMENT_GROUPS[department] || department);
-              }
-          }
-
-          const mappedDashboard = {
-             id: d.id,
-             name: d.name,
-             url: d.embed_url,
-             department: d.department,
-             allowed_departments: d.allowed_departments,
-             assigned_user_id: d.assigned_user_id,
-             sub_group: d.sub_group ?? null,
-          }
-          flatAccessibleDashboards.push(mappedDashboard)
-
-          relevantGroups.forEach(group => {
-               if (!dashboardConfig[group]) {
-                   dashboardConfig[group] = []
-               }
-
-               dashboardConfig[group].push(mappedDashboard)
-          });
-      })
-  }
-
-  // Determine accessible sub-departments
-  const userSubDepts = [department]
-  if (allowedSubDepartments && allowedSubDepartments.length > 0) {
-      userSubDepts.push(...allowedSubDepartments)
-  }
-
-  // If the user's main department is a group (e.g. Comercial), they might see all sub-departments if they are managers/admin?
-  // Current logic implies:
-  // - "Comercial" user -> isManager -> sees all Comercial sub-menus (handled by defaultSubMenus in DepartmentView)
-  // - "Expansão" user -> sees "Expansão" + allowed extras.
-  
-  // We need to pass the explicit list of allowed sub-departments ONLY if we want to restrict or customize it.
-  // If we don't pass it, DepartmentView falls back to "All sub-menus for this group".
-  
-  // Logic:
-  // If user is "Comercial" (the group name), we assume Manager -> Don't pass allowedSubDepartments (show all).
-  // If user is "Expansão" (a sub-dept), we pass [Expansão, ...allowedExtras] to RESTRICT the view to just those.
-  
-  let viewAllowedSubDepartments: string[] | undefined = undefined
-
-  if (!isDiretoria && !isManagerOfGroup) {
-      // It's a specific sub-department user (e.g. Expansão)
-      // They should see their own department + any allowed extras.
-      // We must filter out "Visão Geral" or duplications.
-      viewAllowedSubDepartments = Array.from(new Set([department, ...allowedSubDepartments]))
-  }
-
+  const { user, profile, permissionContext } = await getDashboardData()
   const agora = new Date()
-  const nome = firstName({ fullName: profile?.full_name, email: user.email })
-  const totalRelatorios = flatAccessibleDashboards.length
-  const totalAreas = Object.keys(dashboardConfig).length
-
   return (
-    <>
-      <PageHeader
-        eyebrow={isDiretoria ? 'Visão consolidada · Diretoria' : `Departamento · ${department}`}
-        title={
-          <>
-            {saudacao(agora)}, <span className="text-primary">{nome}</span>.
-          </>
-        }
-        description={
-          <p>
-            <span>{dataPorExtenso(agora)}</span>
-            <span aria-hidden className="mx-2 text-faint">·</span>
-            {totalRelatorios === 1 ? '1 relatório disponível para você' : `${totalRelatorios} relatórios disponíveis para você`}
-          </p>
-        }
-        actions={
-          <dl className="hidden items-stretch divide-x rounded-xl border bg-card shadow-xs md:flex">
-            <div className="space-y-1.5 px-6 py-3">
-              <dt className="eyebrow text-[10px] text-faint">Relatórios</dt>
-              <dd className="text-[1.75rem] font-extrabold leading-none tracking-[-0.02em] tabular-nums text-foreground">{totalRelatorios}</dd>
-            </div>
-            <div className="space-y-1.5 px-6 py-3">
-              <dt className="eyebrow text-[10px] text-faint">Áreas</dt>
-              <dd className="text-[1.75rem] font-extrabold leading-none tracking-[-0.02em] tabular-nums text-foreground">{totalAreas}</dd>
-            </div>
-          </dl>
-        }
-      />
-
-      <div className="flex-1 animate-rise [animation-delay:180ms]">
-        {isDiretoria ? (
-            <CompanyOverview dashboardConfig={dashboardConfig} isLeader={isLeader || isDiretoria} />
-        ) : (
-          <DepartmentView
-              department={mainUserDepartment}
-              dashboards={flatAccessibleDashboards}
-              allowedSubDepartments={viewAllowedSubDepartments}
-              isLeader={isLeader || isDiretoria}
-          />
-        )}
-      </div>
-    </>
+    <DashboardPageContent welcome={{
+      greeting: saudacao(agora),
+      name: firstName({ fullName: profile?.full_name, email: user.email }),
+      date: dataPorExtenso(agora),
+      eyebrow: permissionContext.isDiretoria ? 'Visão consolidada · Diretoria' : `Departamento · ${permissionContext.department}`,
+    }} />
   )
 }
