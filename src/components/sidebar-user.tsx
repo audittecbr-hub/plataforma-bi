@@ -38,11 +38,11 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
         type="submit"
         aria-label="Sair"
         className={cn(
-          "grid size-8 shrink-0 place-items-center rounded-[4px] text-muted-foreground outline-none transition-colors",
+          "grid size-10 shrink-0 place-items-center rounded-[4px] text-muted-foreground outline-none transition-colors",
           "hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/25"
         )}
       >
-        <LogOut className="size-4" />
+        <LogOut className="size-5" />
       </button>
     </Hint>
   )
@@ -51,7 +51,7 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
     <div className={cn("mt-auto shrink-0", mobile ? "pt-1" : "border-t border-white/10 p-3")}>
       <div
         className={cn(
-          "flex items-center gap-1 overflow-hidden rounded-xl border bg-card p-1.5",
+          "flex items-center gap-1 overflow-hidden rounded-xl border bg-card p-2",
           collapsed && "justify-center p-1"
         )}
       >
@@ -62,19 +62,19 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
               aria-label={`Menu da conta de ${nome}`}
               title={collapsed ? `Menu da conta de ${nome}` : undefined}
               className={cn(
-                "group/account flex min-w-0 flex-1 items-center gap-2.5 rounded-[4px] p-1 text-left outline-none transition-colors",
+                "group/account flex min-w-0 flex-1 items-center gap-3 rounded-[4px] p-1 text-left outline-none transition-colors",
                 "hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/25 data-[state=open]:bg-accent",
                 collapsed && "flex-none justify-center"
               )}
             >
-              <Avatar name={user.fullName} email={user.email} size={mobile ? 38 : 34} brand />
+              <Avatar name={user.fullName} email={user.email} size={collapsed ? 34 : 38} brand />
               {!collapsed && (
                 <>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-semibold leading-tight text-foreground">{nome}</span>
-                    <span className="block truncate text-[11.5px] leading-tight text-muted-foreground">{describeRole(user)}</span>
+                    <span className="block truncate text-[15px] font-semibold leading-snug text-foreground">{nome}</span>
+                    <span className="block truncate text-[13px] leading-snug text-muted-foreground">{describeRole(user)}</span>
                   </span>
-                  <ChevronsUpDown aria-hidden className="size-3.5 shrink-0 text-faint transition-colors group-hover/account:text-primary" />
+                  <ChevronsUpDown aria-hidden className="size-[18px] shrink-0 text-muted-foreground transition-colors group-hover/account:text-primary" />
                 </>
               )}
             </button>
@@ -82,14 +82,14 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
           <DropdownMenuContent
             side="top" align="start" sideOffset={10} collisionPadding={12}
             aria-label="Opções da conta"
-            className="dark w-[280px] max-w-[calc(100vw-24px)] border-white/10"
+            className="dark w-[312px] max-w-[calc(100vw-24px)] border-white/15"
           >
-            <DropdownMenuLabel className="pb-2 text-primary">Minha conta</DropdownMenuLabel>
+            <DropdownMenuLabel className="pb-2 text-xs tracking-[0.12em] text-primary">Minha conta</DropdownMenuLabel>
             {accountItems.map((item) => {
               const Icon = item.icon
               const active = isNavActive(pathname, item.href)
               return (
-                <DropdownMenuItem key={item.href} asChild className={cn(active && "bg-gold-wash text-primary")}>
+                <DropdownMenuItem key={item.href} asChild className={cn("min-h-12 gap-3 text-base [&_svg]:size-5", active && "bg-gold-wash text-primary")}>
                   <Link href={item.href} prefetch={false} onClick={onNavigate} aria-current={active ? 'page' : undefined}>
                     <Icon aria-hidden />
                     {item.label}

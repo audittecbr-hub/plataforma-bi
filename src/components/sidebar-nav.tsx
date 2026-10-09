@@ -29,12 +29,12 @@ export function SidebarNav({ mobile = false, onNavigate }: SidebarNavProps) {
           href={item.href} prefetch={true} onClick={onNavigate}
           aria-current={active ? 'page' : undefined}
           className={cn(
-            'group/item relative flex h-10 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-            active ? 'bg-white/[0.07] text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+            'group/item relative flex h-11 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[15px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+            active ? 'bg-white/[0.08] text-foreground' : 'text-foreground/90 hover:bg-accent hover:text-foreground',
           )}
         >
           {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary" />}
-          <Icon aria-hidden className={cn('size-[18px] shrink-0', active ? 'text-primary' : 'text-faint group-hover/item:text-foreground')} />
+          <Icon aria-hidden className={cn('size-5 shrink-0', active ? 'text-primary' : 'text-muted-foreground group-hover/item:text-foreground')} />
           <span className={cn('truncate transition-opacity duration-200', collapsed && 'opacity-0')}>{item.label}</span>
         </Link>
       </Hint>

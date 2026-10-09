@@ -108,7 +108,7 @@ function CommandTrigger() {
 /** Barra superior do portal: trilha, busca (⌘K) e tema; no mobile, também o menu. */
 export function Topbar({ user, signOutAction }: { user: PortalUser; signOutAction: () => Promise<void> }) {
   return (
-    <header className="glass relative z-20 flex h-16 shrink-0 items-center gap-2 border-b px-3 sm:px-5 lg:h-[72px] lg:px-8">
+    <header className="dashboard-topbar glass relative z-20 flex h-16 shrink-0 items-center gap-2 border-b px-3 sm:px-5 lg:h-[72px] lg:px-8">
       <MobileNav user={user} signOutAction={signOutAction} />
 
       <Link href="/dashboard" aria-label="Grupo Studio — início" className="flex items-center lg:hidden">

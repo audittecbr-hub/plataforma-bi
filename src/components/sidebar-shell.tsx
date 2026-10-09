@@ -1,14 +1,13 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useState } from "react"
+import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import Link from "next/link"
 import { ChevronLeft } from "lucide-react"
 import { BrandLogo, BrandSeal } from "@/components/brand/logo"
 import { Hint } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
-const STORAGE_KEY = "sidebar-collapsed"
-const LARGURA_ABERTA = "w-[304px] xl:w-[320px]"
+const LARGURA_ABERTA = "w-[320px] xl:w-[336px]"
 const LARGURA_FECHADA = "w-[76px]"
 
 const SidebarContext = createContext<{ collapsed: boolean; toggle: () => void; expand: () => void }>({
@@ -22,81 +21,29 @@ export function useSidebar() {
   return useContext(SidebarContext)
 }
 
-/**
- * Casca client da sidebar: guarda o estado de recolhido e a largura.
- *
- * O `Sidebar` continua server component (lê a sessão e usa o server action de
- * signOut). A casca publica um `data-collapsed` para o layout reagir por CSS
- * (variantes `group-data-[collapsed=true]/sidebar:`) e um contexto para os
- * filhos client que precisam do valor em JS — como os tooltips da navegação.
- *
- * Ícones e avatar ficam no mesmo x nos dois estados: o recolhimento só anima a
- * largura e esmaece os rótulos, sem nada "pular" no fim.
- *
- * A sidebar é sempre em preto premium (a classe `dark` troca os tokens só aqui
- * dentro), com o logo oficial em branco — nos dois temas.
- */
+/** Estado compartilhado: inicia expandido e só recolhe durante a visita atual. */
+export function SidebarProvider({ children }: { children: React.ReactNode }) {
+  const [collapsed, setCollapsed] = useState(false)
+  const toggle = useCallback(() => setCollapsed((current) => !current), [])
+  const expand = useCallback(() => setCollapsed(false), [])
+  const context = useMemo(() => ({ collapsed, toggle, expand }), [collapsed, toggle, expand])
+
+  return <SidebarContext.Provider value={context}>{children}</SidebarContext.Provider>
+}
+
+/** Casca escura da lateral; publica data-collapsed para os filhos reagirem por CSS. */
 export function SidebarShell({ children }: { children: React.ReactNode }) {
-  // Os dois valores vivem no mesmo state para que restaurar a preferência seja
-  // um único setState. `mounted` existe porque a preferência só é conhecida no
-  // cliente: sem ela, restaurar "recolhido" animaria a largura na carga.
-  const [{ collapsed, mounted }, setEstado] = useState({ collapsed: false, mounted: false })
-
-  useEffect(() => {
-    let salvo = false
-    try {
-      salvo = window.localStorage.getItem(STORAGE_KEY) === "true"
-    } catch {
-      // Modo privado ou storage bloqueado: segue expandido, sem persistir.
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEstado({ collapsed: salvo, mounted: true })
-  }, [])
-
-  const toggle = useCallback(() => {
-    setEstado((atual) => {
-      const proximo = !atual.collapsed
-      try {
-        window.localStorage.setItem(STORAGE_KEY, String(proximo))
-      } catch {
-        // Preferência não persiste; o estado da sessão continua valendo.
-      }
-      return { ...atual, collapsed: proximo }
-    })
-  }, [])
-
-  const expand = useCallback(() => {
-    setEstado((atual) => ({ ...atual, collapsed: false }))
-    try {
-      window.localStorage.setItem(STORAGE_KEY, 'false')
-    } catch {
-      // O menu continua utilizável mesmo sem persistência.
-    }
-  }, [])
-
-  // Atalho "[" (fora de campos de texto) — o mesmo de Linear e Figma.
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== "[" || e.metaKey || e.ctrlKey || e.altKey) return
-      const alvo = e.target as HTMLElement | null
-      if (alvo && (alvo.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(alvo.tagName))) return
-      toggle()
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [toggle])
+  const { collapsed, toggle } = useSidebar()
 
   return (
-    <SidebarContext.Provider value={{ collapsed, toggle, expand }}>
       <div
         data-collapsed={collapsed}
         className={cn(
-          "dark group/sidebar relative flex h-full flex-col border-r bg-background text-foreground",
-          collapsed ? LARGURA_FECHADA : LARGURA_ABERTA,
-          mounted && "transition-[width] duration-300 ease-out-brand"
+          "dark group/sidebar relative flex h-full flex-col border-r bg-background text-foreground transition-[width] duration-300 ease-out-brand motion-reduce:transition-none",
+          collapsed ? LARGURA_FECHADA : LARGURA_ABERTA
         )}
       >
-        <div className="relative flex h-[84px] shrink-0 items-center overflow-hidden px-6">
+        <div className="relative flex h-[88px] shrink-0 items-center overflow-hidden px-6">
           <Link
             href="/dashboard"
             aria-label="Grupo Studio — início"
@@ -104,7 +51,7 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
           >
             <BrandLogo
               tone="white"
-              height={36}
+              height={38}
               priority
               className="transition-opacity duration-200 group-data-[collapsed=true]/sidebar:pointer-events-none group-data-[collapsed=true]/sidebar:opacity-0"
             />
@@ -122,23 +69,22 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
         {children}
 
         {/* Alça de recolher na borda — fica acima do conteúdo vizinho */}
-        <Hint label={collapsed ? "Expandir menu" : "Recolher menu"} side="right" shortcut="[">
+        <Hint label={collapsed ? "Expandir menu" : "Recolher menu"} side="right">
           <button
             type="button"
             onClick={toggle}
             aria-label={collapsed ? "Expandir menu" : "Minimizar menu"}
             aria-expanded={!collapsed}
             className={cn(
-              "absolute -right-3 top-[30px] z-40 grid size-6 place-items-center rounded-full border bg-card text-muted-foreground shadow-sm outline-none",
+              "absolute -right-[18px] top-[26px] z-40 grid size-9 place-items-center rounded-full border bg-card text-foreground shadow-sm outline-none",
               "transition-[color,border-color] hover:border-primary hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/25"
             )}
           >
             <ChevronLeft
-              className={cn("size-3.5 transition-transform duration-300 ease-out-brand", collapsed && "rotate-180")}
+              className={cn("size-[18px] transition-transform duration-300 ease-out-brand motion-reduce:transition-none", collapsed && "rotate-180")}
             />
           </button>
         </Hint>
       </div>
-    </SidebarContext.Provider>
   )
 }

@@ -395,6 +395,57 @@ html:has([data-auth-shell]) body {
 
 /* ── Embed Power BI ───────────────────────────────────────────────── */
 
+/* Menu recolhido no desktop: usa toda a largura e a altura restante da janela.
+   A mudança é de layout; o iframe e o zoom permanecem montados. */
+@media (min-width: 1024px) {
+  .dashboard-workspace[data-report-focus="true"] {
+    --report-viewer-height: 100%;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-topbar {
+    height: 56px;
+    padding-inline: 24px;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-content {
+    height: 100%;
+    min-height: 0;
+    max-width: none;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-report {
+    min-height: 0;
+    gap: 12px;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-report-header {
+    padding-inline: 8px;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-report-header > :not(:last-child) {
+    margin-bottom: 6px;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-report-header > :nth-child(2) {
+    margin-bottom: 0;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-report-title {
+    font-size: 26px;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] .dashboard-report-details {
+    display: none;
+  }
+
+  .dashboard-workspace[data-report-focus="true"] :is(.dashboard-report-viewer, .dashboard-selector, .dashboard-selector-stage, .dashboard-selector-page) {
+    height: 100%;
+    min-height: 0;
+  }
+}
+
 /* Container do relatório em tela cheia (controlada pelo portal). */
 .pbi-shell:fullscreen {
   border-radius: 0;

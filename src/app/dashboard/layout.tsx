@@ -5,6 +5,8 @@ import { CommandMenu } from "@/components/command-menu"
 import { Sidebar } from "@/components/sidebar"
 import { Topbar } from "@/components/topbar"
 import { DashboardNavigationProvider } from "@/components/dashboard-navigation-provider"
+import { DashboardShortcutsProvider } from "@/components/dashboard-shortcuts-provider"
+import { DashboardWorkspace } from "@/components/dashboard-workspace"
 import { getDashboardData } from "@/lib/dashboard-data"
 import type { PortalUser } from "@/lib/user-display"
 
@@ -26,7 +28,8 @@ export default async function DashboardLayout({
   return (
     <Suspense>
       <DashboardNavigationProvider catalog={catalog}>
-        <div className="relative isolate flex h-dvh w-full overflow-hidden">
+        <DashboardShortcutsProvider userId={user.id}>
+        <DashboardWorkspace>
           <AppBackdrop />
 
           <aside className="relative z-30 hidden h-full shrink-0 lg:flex">
@@ -37,14 +40,15 @@ export default async function DashboardLayout({
             <Topbar user={portalUser} signOutAction={signOut} />
 
             <main id="conteudo" className="flex-1 overflow-y-auto overflow-x-hidden">
-              <div className="mx-auto flex min-h-full w-full max-w-[1760px] flex-col gap-6 px-4 py-6 sm:px-6 lg:gap-8 lg:px-8 lg:py-8 2xl:px-10">
+              <div className="dashboard-content mx-auto flex min-h-full w-full max-w-[1760px] flex-col gap-6 px-4 py-6 sm:px-6 lg:gap-8 lg:px-8 lg:py-8 2xl:px-10">
                 {children}
               </div>
             </main>
           </div>
 
           <CommandMenu isAdmin={portalUser.isAdmin} signOutAction={signOut} />
-        </div>
+        </DashboardWorkspace>
+        </DashboardShortcutsProvider>
       </DashboardNavigationProvider>
     </Suspense>
   )

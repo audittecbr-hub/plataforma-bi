@@ -6,7 +6,8 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { PowerBIEmbed } from '@/components/powerbi-embed'
 import { useDashboardNavigation } from '@/components/dashboard-navigation-provider'
 
-const REPORT_HEIGHT = 'max(540px, calc(100dvh - 16rem))'
+// No modo amplo, a altura acompanha o espaço restante no layout flex.
+const REPORT_HEIGHT = 'var(--report-viewer-height, max(540px, calc(100dvh - 16rem)))'
 
 /** O visualizador acompanha a seleção feita no menu lateral e no histórico. */
 export function DashboardSelector() {
@@ -17,11 +18,12 @@ export function DashboardSelector() {
   const sectionLabel = selection?.section.label !== 'Visão geral' ? selection?.section.label : null
 
   return (
-    <section aria-label="Relatório selecionado" className="relative flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
+    <section aria-label="Relatório selecionado" className="dashboard-selector relative flex flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
       <span aria-hidden className="pointer-events-none absolute left-5 top-0 z-10 h-[3px] w-10 bg-gold" />
-      <div className="relative">
+      <div className="dashboard-selector-stage relative">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
+            className="dashboard-selector-page"
             key={dashboard?.id ?? 'empty'}
             initial={prefersReducedMotion ? false : { opacity: 0 }}
             animate={{ opacity: 1 }} exit={{ opacity: 0 }}
