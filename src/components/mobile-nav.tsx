@@ -41,7 +41,7 @@ export function MobileNav({ user, signOutAction }: MobileNavProps) {
   return (
     <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
       <DialogPrimitive.Trigger asChild>
-        <Button variant="ghost" size="icon" className="size-9 rounded-full lg:hidden" aria-label="Abrir menu">
+        <Button variant="ghost" size="icon" className="size-11 rounded-full lg:hidden" aria-label="Abrir menu">
           <Menu className="size-5" />
         </Button>
       </DialogPrimitive.Trigger>
@@ -50,7 +50,7 @@ export function MobileNav({ user, signOutAction }: MobileNavProps) {
         <DialogPrimitive.Overlay className={overlayClasses} />
         <DialogPrimitive.Content
           className={cn(
-            "dark fixed inset-y-0 left-0 z-50 flex w-[88vw] max-w-[340px] flex-col border-r bg-background text-foreground shadow-xl outline-none",
+            "dark fixed inset-y-0 left-0 z-50 flex w-[90vw] max-w-[360px] flex-col border-r bg-background text-foreground shadow-xl outline-none",
             "data-[state=open]:animate-in data-[state=open]:slide-in-from-left data-[state=open]:duration-500 data-[state=open]:ease-out-brand",
             "data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=closed]:duration-300"
           )}
@@ -61,10 +61,10 @@ export function MobileNav({ user, signOutAction }: MobileNavProps) {
           </DialogPrimitive.Description>
 
           <div className="relative flex items-center justify-between px-5 pb-5 pt-6">
-            <BrandLogo tone="white" height={34} />
+            <BrandLogo tone="white" height={36} />
             <DialogPrimitive.Close asChild>
-              <Button variant="ghost" size="icon-sm" aria-label="Fechar menu">
-                <X className="size-4" />
+              <Button variant="ghost" size="icon" className="size-11" aria-label="Fechar menu">
+                <X className="size-5" />
               </Button>
             </DialogPrimitive.Close>
           </div>
@@ -75,7 +75,7 @@ export function MobileNav({ user, signOutAction }: MobileNavProps) {
 
           <div className="relative shrink-0 space-y-3 border-t border-white/10 p-4">
             <div>
-              <p className="eyebrow pb-2 text-[10px] text-primary">Aparência</p>
+              <p className="eyebrow pb-2 text-xs tracking-[0.12em] text-primary">Aparência</p>
               <div className="grid grid-cols-3 gap-1 rounded-xl border bg-card p-1">
                 {TEMAS.map(({ value, label, icon: Icon }) => (
                   <button
@@ -84,14 +84,14 @@ export function MobileNav({ user, signOutAction }: MobileNavProps) {
                     onClick={() => setTheme(value)}
                     aria-pressed={theme === value}
                     className={cn(
-                      "flex h-9 items-center justify-center gap-1.5 rounded-[4px] text-xs font-semibold outline-none transition-colors",
+                      "flex h-11 items-center justify-center gap-1.5 rounded-[4px] text-sm font-semibold outline-none transition-colors",
                       "focus-visible:ring-[3px] focus-visible:ring-ring/25",
                       theme === value
                         ? "bg-white text-ink"
                         : "text-muted-foreground hover:text-foreground"
                     )}
                   >
-                    <Icon className="size-3.5" />
+                    <Icon className="size-4" />
                     {label}
                   </button>
                 ))}

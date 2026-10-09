@@ -2,7 +2,8 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type MouseEvent, type KeyboardEvent } from 'react'
 import Link from 'next/link'
-import { ChartColumnBig, Check, ChevronRight, Folder, Search, SearchX, X } from 'lucide-react'
+import { ChartColumnBig, ChevronRight, Folder, Search, SearchX, X } from 'lucide-react'
+import { DashboardFavoriteButton } from '@/components/dashboard-favorite-button'
 import { DASHBOARD_NAVIGATION_EVENT, openDashboardNavigation, useDashboardNavigation } from '@/components/dashboard-navigation-provider'
 import { useSidebar } from '@/components/sidebar-shell'
 import { Hint } from '@/components/ui/tooltip'
@@ -76,26 +77,26 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
     onNavigate?.()
   }
   const renderReports = (area: DashboardArea, section: DashboardSection) => (
-    <ul aria-label={`Relatórios de ${area.label} · ${section.label}`} className="max-h-[min(28dvh,208px)] space-y-0.5 overflow-y-auto overscroll-contain py-1 pr-1">
+    <ul aria-label={`Relatórios de ${area.label} · ${section.label}`} className="max-h-[min(36dvh,288px)] space-y-1 overflow-y-auto overscroll-contain py-1.5 pr-1">
       {section.dashboards.map((report) => {
         const active = current?.dashboard.id === report.id && current.area.id === area.id && current.section.id === section.id
         return (
-          <li key={report.id}>
+          <li key={report.id} className="flex items-center gap-1">
             <Link
               ref={active ? activeLink : undefined}
               href={hrefFor(area.id, section.id, report.id)} prefetch={false}
               onClick={(event) => navigate(event, area, section, report.id)}
               aria-current={active ? 'page' : undefined} title={report.name}
               className={cn(
-                'group/report relative flex min-h-9 items-start gap-2 rounded-[4px] px-2.5 py-2 text-[12.5px] leading-[1.4] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                active ? 'bg-gold-wash font-semibold text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                'group/report relative flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-[4px] px-2.5 py-2.5 text-[15px] leading-[1.4] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                active ? 'bg-gold-wash font-semibold text-primary' : 'font-medium text-foreground/85 hover:bg-accent hover:text-foreground',
               )}
             >
-              {active && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary" />}
-              <ChartColumnBig aria-hidden className="mt-px size-3.5 shrink-0 opacity-70" />
+              {active && <span aria-hidden className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-primary" />}
+              <ChartColumnBig aria-hidden className="mt-0.5 size-4 shrink-0" />
               <span className="min-w-0 flex-1 break-words">{report.name}</span>
-              {active && <Check aria-hidden className="mt-px size-3.5 shrink-0" />}
             </Link>
+            <DashboardFavoriteButton location={{ dashboardId: report.id, areaId: area.id, sectionId: section.id }} name={report.name} className="size-9" />
           </li>
         )
       })}
@@ -104,31 +105,32 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className={cn('shrink-0 px-3 pb-2 pt-4', collapsed && 'px-0')}>
-        <div className="mb-2 flex h-5 items-center justify-between px-2">
-          <p className={cn('eyebrow whitespace-nowrap text-[9px] text-primary', collapsed && 'sr-only')}>Áreas e projetos</p>
-          {!collapsed && <span className="text-[10px] tabular-nums text-faint">{catalog.areas.length} áreas</span>}
+      <div className={cn('shrink-0 px-3 pb-2.5 pt-4', collapsed && 'px-0')}>
+        <div className="mb-2 flex min-h-5 items-center justify-between gap-2 px-2">
+          <p className={cn('eyebrow whitespace-nowrap text-[11px] tracking-[0.12em] text-primary', collapsed && 'sr-only')}>Áreas e projetos</p>
+          {!collapsed && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{catalog.areas.length} áreas</span>}
         </div>
+        {!collapsed && <p className="px-2 pb-2.5 text-xs leading-relaxed text-muted-foreground">Área <span aria-hidden>›</span> Subárea <span aria-hidden>›</span> Relatório</p>}
         {collapsed ? (
           <Hint label="Buscar áreas e relatórios" side="right">
-            <button type="button" onClick={openDashboardNavigation} aria-label="Buscar áreas e relatórios" className="mx-auto grid size-10 place-items-center rounded-[4px] text-muted-foreground outline-none hover:bg-accent hover:text-primary focus-visible:ring-2 focus-visible:ring-ring">
-              <Search aria-hidden className="size-4" />
+            <button type="button" onClick={openDashboardNavigation} aria-label="Buscar áreas e relatórios" className="mx-auto grid size-11 place-items-center rounded-[4px] text-muted-foreground outline-none hover:bg-accent hover:text-primary focus-visible:ring-2 focus-visible:ring-ring">
+              <Search aria-hidden className="size-5" />
             </button>
           </Hint>
         ) : (
-          <div className="relative flex h-9 items-center gap-2 rounded-[4px] border border-white/10 bg-white/[0.035] px-2.5 transition-colors focus-within:border-primary/50 focus-within:ring-2 focus-within:ring-primary/10">
-            <Search aria-hidden className="size-3.5 shrink-0 text-faint" />
+          <div className="relative flex h-11 items-center gap-2.5 rounded-[4px] border border-white/20 bg-white/[0.045] pl-3 pr-1.5 transition-colors focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/15">
+            <Search aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
             <input
               ref={searchInput}
               type="search" aria-label="Buscar áreas e relatórios" placeholder="Buscar área ou relatório…"
               value={query} onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => { if (event.key === 'Escape') setQuery('') }}
-              className="h-full min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none placeholder:text-faint [&::-webkit-search-cancel-button]:hidden"
+              className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
             />
-            {query && <button type="button" onClick={() => setQuery('')} aria-label="Limpar busca" className="grid size-5 shrink-0 place-items-center rounded text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X aria-hidden className="size-3" /></button>}
+            {query && <button type="button" onClick={() => setQuery('')} aria-label="Limpar busca" className="grid size-10 shrink-0 place-items-center rounded text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"><X aria-hidden className="size-4" /></button>}
           </div>
         )}
-        {!collapsed && searching && <p role="status" className="px-1 pt-2 text-[11px] text-muted-foreground">{resultCount} {resultCount === 1 ? 'relatório encontrado' : 'relatórios encontrados'}</p>}
+        {!collapsed && searching && <p role="status" className="px-2 pt-2 text-sm text-muted-foreground">{resultCount} {resultCount === 1 ? 'relatório encontrado' : 'relatórios encontrados'}</p>}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
@@ -150,22 +152,22 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
                       else setExpanded({ selectionKey, areaId: '', sectionId: '' })
                     })}
                     className={cn(
-                      'group/area flex min-h-10 w-full items-center gap-2.5 rounded-[4px] px-3 text-left text-[13px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                      active ? 'bg-white/[0.055] text-foreground' : 'text-muted-foreground hover:bg-accent hover:text-foreground',
+                      'group/area flex min-h-11 w-full items-center gap-2.5 rounded-[4px] px-3 py-2 text-left text-[15px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                      active ? 'bg-gold-wash text-primary' : areaOpen ? 'bg-white/[0.06] text-foreground' : 'text-foreground/90 hover:bg-accent hover:text-foreground',
                       collapsed && 'justify-center px-0',
                     )}
                   >
-                    <Icon aria-hidden className={cn('size-[17px] shrink-0', active ? 'text-primary' : 'text-faint group-hover/area:text-primary')} />
+                    <Icon aria-hidden className={cn('size-5 shrink-0', active || areaOpen ? 'text-primary' : 'text-muted-foreground group-hover/area:text-primary')} />
                     {!collapsed && <>
-                      <span className="min-w-0 flex-1">{area.label}</span>
-                      <span className={cn('min-w-5 text-center text-[10px] font-medium tabular-nums', active ? 'text-primary' : 'text-faint')}>{area.reportCount}</span>
-                      <ChevronRight aria-hidden className={cn('size-3.5 shrink-0 text-faint transition-transform duration-200 motion-reduce:transition-none', areaOpen && 'rotate-90')} />
+                      <span className="min-w-0 flex-1 leading-snug">{area.label}</span>
+                      <span aria-label={`${area.reportCount} relatórios`} title={`${area.reportCount} relatórios nesta área`} className={cn('shrink-0 rounded-[4px] px-1.5 py-1 text-xs font-medium tabular-nums', active ? 'bg-primary/10 text-primary' : 'bg-white/[0.06] text-muted-foreground')}>{area.reportCount} <span className="font-normal">rel.</span></span>
+                      <ChevronRight aria-hidden className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none', areaOpen && 'rotate-90')} />
                     </>}
                   </button>
                 </Hint>
-                <div id={areaContentId} hidden={!areaOpen} className="ml-5 border-l border-white/10 pl-2 motion-safe:animate-[fade_180ms_ease-out]">
+                <div id={areaContentId} hidden={!areaOpen} className="ml-6 border-l border-white/20 pl-2">
                   {areaOpen && (directReports ? renderReports(area, area.sections[0]) : (
-                    <ul className="space-y-0.5 py-1">
+                    <ul className="space-y-1 py-1.5">
                       {area.sections.map((section, sectionIndex) => {
                         const sectionActive = active && current.section.id === section.id
                         const sectionOpen = searching || openSection === section.id
@@ -180,15 +182,15 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
                                 else setExpanded({ selectionKey, areaId: area.id, sectionId: '' })
                               })}
                               className={cn(
-                                'flex min-h-9 w-full items-start gap-2 rounded-[4px] px-2 py-2 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
-                                sectionActive ? 'font-semibold text-primary' : 'font-medium text-muted-foreground hover:bg-accent hover:text-foreground',
+                                'flex min-h-11 w-full items-start gap-2 rounded-[4px] px-2 py-2.5 text-left text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                                sectionActive ? 'font-semibold text-primary' : 'font-medium text-foreground/90 hover:bg-accent hover:text-foreground',
                               )}
                             >
-                              <ChevronRight aria-hidden className={cn('mt-px size-3.5 shrink-0 transition-transform duration-200 motion-reduce:transition-none', sectionOpen && 'rotate-90')} />
+                              <ChevronRight aria-hidden className={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-200 motion-reduce:transition-none', sectionOpen && 'rotate-90')} />
                               <span className="min-w-0 flex-1 break-words leading-[1.4]">{section.label}</span>
-                              <span className="text-[10px] font-normal tabular-nums text-faint">{section.dashboards.length}</span>
+                              <span title={`${section.dashboards.length} relatórios nesta subárea`} className="mt-0.5 shrink-0 rounded bg-white/[0.06] px-1.5 text-[13px] font-medium leading-5 tabular-nums text-muted-foreground">{section.dashboards.length}</span>
                             </button>
-                            <div id={sectionContentId} hidden={!sectionOpen} className="ml-3.5 border-l border-white/10 pl-1.5 motion-safe:animate-[fade_180ms_ease-out]">{sectionOpen && renderReports(area, section)}</div>
+                            <div id={sectionContentId} hidden={!sectionOpen} className="ml-4 border-l border-white/20 pl-1.5">{sectionOpen && renderReports(area, section)}</div>
                           </li>
                         )
                       })}
@@ -201,10 +203,10 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
         </ul>
         {!collapsed && areas.length === 0 && (
           <div className="flex flex-col items-center gap-2 px-3 py-8 text-center">
-            <SearchX aria-hidden className="size-5 text-faint" />
-            <p className="text-xs font-medium text-muted-foreground">{searching ? 'Nenhum relatório encontrado' : 'Nenhum relatório disponível'}</p>
-            <p className="text-[11px] leading-relaxed text-faint">{searching ? 'Tente outro nome de área, subárea ou projeto.' : 'Os relatórios liberados para você aparecerão aqui.'}</p>
-            {searching && <button type="button" onClick={() => setQuery('')} className="mt-1 rounded px-2 py-1 text-xs font-semibold text-primary outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">Limpar busca</button>}
+            <SearchX aria-hidden className="size-6 text-muted-foreground" />
+            <p className="text-base font-medium text-foreground">{searching ? 'Nenhum relatório encontrado' : 'Nenhum relatório disponível'}</p>
+            <p className="text-sm leading-relaxed text-muted-foreground">{searching ? 'Tente outro nome de área, subárea ou projeto.' : 'Os relatórios liberados para você aparecerão aqui.'}</p>
+            {searching && <button type="button" onClick={() => setQuery('')} className="mt-1 min-h-11 rounded px-3 py-2 text-sm font-semibold text-primary outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring">Limpar busca</button>}
           </div>
         )}
       </div>

@@ -22,6 +22,20 @@ O portal abre com a saudação e uma tela de boas-vindas. Ao escolher um relató
 o cabeçalho passa a mostrar seu nome, área, subárea, tipo e posição na lista.
 Links diretos abrem o relatório correspondente, sem passar pela saudação.
 
+A página inicial oferece cartões de **Favoritos** e **Acessados recentemente**.
+Use a estrela no cartão, no menu lateral ou no cabeçalho de um relatório para
+fixá-lo; **Escolher/Gerenciar favoritos** também permite selecionar vários
+projetos sem abrir os painéis. Antes do primeiro acesso, a seção de recentes
+mostra sugestões de relatórios permitidos, identificadas como sugestões.
+As capas são ilustrações por tipo de relatório, sem dados financeiros simulados.
+A seção de Favoritos só aparece quando há um projeto marcado, e desaparece ao
+remover o último. Sem favoritos, o botão **Escolher favoritos** fica ao lado do
+título dos cartões de relatórios.
+Favoritos e histórico ficam neste navegador, separados pelo ID autenticado da
+conta. Só IDs, caminhos de navegação e datas de acesso são guardados; os nomes e
+links vêm do catálogo autorizado. Relatórios removidos ou sem permissão deixam
+de aparecer nos atalhos. A prévia não sincroniza preferências entre dispositivos.
+
 Áreas, subáreas e relatórios ficam no menu lateral em cascata. Clique na área,
 abra a subárea e escolha o relatório; áreas sem subdivisões mostram os
 relatórios diretamente. A busca no menu aceita nomes de áreas, subáreas e
@@ -29,6 +43,16 @@ projetos, inclusive sem acentos. `Ctrl+K` também encontra os relatórios.
 No celular, a mesma cascata está no botão de menu e fecha ao escolher um painel.
 Configurações e Administração ficam no menu da conta, aberto pelo nome ou avatar
 no rodapé. A opção de Administração aparece apenas para administradores.
+A lateral inicia sempre expandida, mesmo após recarregar ou abrir o portal em
+uma nova aba. O botão de minimizar recolhe o menu apenas durante a navegação
+atual; preferências de visitas anteriores não são restauradas. Os nomes de
+áreas, subáreas e relatórios usam texto de 15 px e linhas de pelo menos 44 px
+para facilitar a leitura e a seleção.
+
+Ao recolher a lateral com um relatório aberto no desktop, o portal entra no
+modo amplo: reduz margens, compacta o cabeçalho e usa toda a largura e a altura
+restante da janela para o Power BI. A barra de zoom continua visível. Expandir
+o menu restaura o layout normal, preservando o iframe, os filtros do BI e o zoom.
 
 O caminho selecionado é salvo na URL (`area`, `subarea`, `report`), permitindo
 compartilhar links e usar voltar/avançar. A hierarquia é montada no servidor com
