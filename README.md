@@ -48,6 +48,11 @@ uma nova aba. O botão de minimizar recolhe o menu apenas durante a navegação
 atual; preferências de visitas anteriores não são restauradas. Os nomes de
 áreas, subáreas e relatórios usam texto de 15 px e linhas de pelo menos 44 px
 para facilitar a leitura e a seleção.
+Em janelas desktop com até 720 px de altura útil, a lateral adapta a largura
+para 288 px e usa texto de 14 px, com logo, busca e espaçamentos mais compactos.
+Nesse modo, a lista usa uma única rolagem e mantém o cabeçalho da área aberta
+disponível para recolher o ramo. A adaptação acompanha o tamanho da janela;
+não altera a resolução, a escala do Windows nem o zoom do navegador.
 
 Ao recolher a lateral com um relatório aberto no desktop, o portal entra no
 modo amplo: reduz margens, compacta o cabeçalho e usa toda a largura e a altura

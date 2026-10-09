@@ -393,6 +393,66 @@ html:has([data-auth-shell]) body {
   animation-timing-function: var(--gs-ease-out);
 }
 
+/* Em monitores como 1366×768, as barras do navegador deixam pouca altura útil.
+   Compacta somente a lateral desktop; telas altas e o menu mobile mantêm a
+   escala normal. O rolamento é único e a área aberta fica disponível no topo. */
+@media (min-width: 1024px) and (max-height: 720px) {
+  .sidebar-panel[data-collapsed="false"] { width: 288px; }
+  .sidebar-panel .sidebar-brand { height: 64px; padding-inline: 20px; }
+  .sidebar-panel .sidebar-logo img { height: 34px !important; width: auto !important; }
+  .sidebar-panel .sidebar-collapse { width: 32px; height: 32px; top: 16px; right: -16px; }
+  .sidebar-panel .sidebar-navigation { padding-top: 8px; }
+  .sidebar-panel .sidebar-nav-link { height: 38px; font-size: 14px; }
+  .sidebar-panel .sidebar-nav-link > svg { width: 18px; height: 18px; }
+  .sidebar-panel .sidebar-tree-header { padding-top: 10px; padding-bottom: 8px; }
+  .sidebar-panel .sidebar-guide { display: none; }
+  .sidebar-panel .sidebar-search { height: 36px; gap: 8px; }
+  .sidebar-panel .sidebar-search input { font-size: 13px; }
+  .sidebar-panel .sidebar-search > svg { width: 16px; height: 16px; }
+  .sidebar-panel .sidebar-search > button { width: 28px; height: 28px; }
+  .sidebar-panel .sidebar-tree-scroll { padding-bottom: 8px; }
+  .sidebar-panel .sidebar-areas > :not(:last-child) { margin-bottom: 2px; }
+  .sidebar-panel :is(.sidebar-area-row, .sidebar-subarea-row) {
+    min-height: 36px;
+    font-size: 14px;
+    padding-block: 6px;
+    gap: 8px;
+  }
+  .sidebar-panel .sidebar-area-row > svg { width: 18px; height: 18px; }
+  .sidebar-panel .sidebar-area-row[aria-expanded="true"] {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: color-mix(in oklab, var(--background) 90%, var(--gold) 10%);
+  }
+  .sidebar-panel .sidebar-area-branch { margin-left: 18px; padding-left: 4px; }
+  .sidebar-panel .sidebar-reports {
+    max-height: none;
+    overflow: visible;
+    padding-block: 2px;
+    padding-right: 0;
+  }
+  .sidebar-panel .sidebar-report-link {
+    min-height: 36px;
+    padding: 7px 6px;
+    font-size: 14px;
+    line-height: 1.35;
+    gap: 6px;
+  }
+  .sidebar-panel .sidebar-report-link > svg { width: 14px; height: 14px; }
+  .sidebar-panel .sidebar-favorite-trigger { width: 28px; height: 28px; }
+  .sidebar-panel .sidebar-favorite-trigger > svg { width: 15px; height: 15px; }
+  .sidebar-panel .sidebar-user { padding: 8px 10px; }
+  .sidebar-panel .sidebar-account { padding: 6px; }
+  .sidebar-panel .sidebar-account-trigger { gap: 8px; }
+  .sidebar-panel .sidebar-avatar { width: 32px !important; height: 32px !important; font-size: 11px !important; }
+  .sidebar-panel .sidebar-user-name { font-size: 14px; }
+  .sidebar-panel .sidebar-user-role { font-size: 12px; }
+  .sidebar-panel .sidebar-account-trigger > svg { width: 14px; height: 14px; }
+  .sidebar-panel .sidebar-logout-button { width: 32px; height: 32px; }
+  .sidebar-panel .sidebar-logout-button > svg { width: 16px; height: 16px; }
+}
+
 /* ── Embed Power BI ───────────────────────────────────────────────── */
 
 /* Menu recolhido no desktop: usa toda a largura e a altura restante da janela.

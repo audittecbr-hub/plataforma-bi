@@ -77,7 +77,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
     onNavigate?.()
   }
   const renderReports = (area: DashboardArea, section: DashboardSection) => (
-    <ul aria-label={`Relatórios de ${area.label} · ${section.label}`} className="max-h-[min(36dvh,288px)] space-y-1 overflow-y-auto overscroll-contain py-1.5 pr-1">
+    <ul aria-label={`Relatórios de ${area.label} · ${section.label}`} className="sidebar-reports max-h-[min(36dvh,288px)] space-y-1 overflow-y-auto overscroll-contain py-1.5 pr-1">
       {section.dashboards.map((report) => {
         const active = current?.dashboard.id === report.id && current.area.id === area.id && current.section.id === section.id
         return (
@@ -88,7 +88,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
               onClick={(event) => navigate(event, area, section, report.id)}
               aria-current={active ? 'page' : undefined} title={report.name}
               className={cn(
-                'group/report relative flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-[4px] px-2.5 py-2.5 text-[15px] leading-[1.4] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                'sidebar-report-link group/report relative flex min-h-11 min-w-0 flex-1 items-start gap-2 rounded-[4px] px-2.5 py-2.5 text-[15px] leading-[1.4] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
                 active ? 'bg-gold-wash font-semibold text-primary' : 'font-medium text-foreground/85 hover:bg-accent hover:text-foreground',
               )}
             >
@@ -96,7 +96,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
               <ChartColumnBig aria-hidden className="mt-0.5 size-4 shrink-0" />
               <span className="min-w-0 flex-1 break-words">{report.name}</span>
             </Link>
-            <DashboardFavoriteButton location={{ dashboardId: report.id, areaId: area.id, sectionId: section.id }} name={report.name} className="size-9" />
+            <DashboardFavoriteButton location={{ dashboardId: report.id, areaId: area.id, sectionId: section.id }} name={report.name} className="sidebar-favorite-trigger size-9" />
           </li>
         )
       })}
@@ -105,12 +105,12 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className={cn('shrink-0 px-3 pb-2.5 pt-4', collapsed && 'px-0')}>
+      <div className={cn('sidebar-tree-header shrink-0 px-3 pb-2.5 pt-4', collapsed && 'px-0')}>
         <div className="mb-2 flex min-h-5 items-center justify-between gap-2 px-2">
           <p className={cn('eyebrow whitespace-nowrap text-[11px] tracking-[0.12em] text-primary', collapsed && 'sr-only')}>Áreas e projetos</p>
           {!collapsed && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{catalog.areas.length} áreas</span>}
         </div>
-        {!collapsed && <p className="px-2 pb-2.5 text-xs leading-relaxed text-muted-foreground">Área <span aria-hidden>›</span> Subárea <span aria-hidden>›</span> Relatório</p>}
+        {!collapsed && <p className="sidebar-guide px-2 pb-2.5 text-xs leading-relaxed text-muted-foreground">Área <span aria-hidden>›</span> Subárea <span aria-hidden>›</span> Relatório</p>}
         {collapsed ? (
           <Hint label="Buscar áreas e relatórios" side="right">
             <button type="button" onClick={openDashboardNavigation} aria-label="Buscar áreas e relatórios" className="mx-auto grid size-11 place-items-center rounded-[4px] text-muted-foreground outline-none hover:bg-accent hover:text-primary focus-visible:ring-2 focus-visible:ring-ring">
@@ -118,7 +118,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
             </button>
           </Hint>
         ) : (
-          <div className="relative flex h-11 items-center gap-2.5 rounded-[4px] border border-white/20 bg-white/[0.045] pl-3 pr-1.5 transition-colors focus-within:border-primary/60 focus-within:ring-2 focus-within:ring-primary/15">
+          <div className="sidebar-search relative flex h-11 items-center gap-2.5 rounded-[4px] border border-white/20 bg-white/[0.045] pl-3 pr-1.5 transition-colors focus-within:border-primary/60 focus-within:ring-primary/15 focus-within:ring-2">
             <Search aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
             <input
               ref={searchInput}
@@ -133,8 +133,8 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
         {!collapsed && searching && <p role="status" className="px-2 pt-2 text-sm text-muted-foreground">{resultCount} {resultCount === 1 ? 'relatório encontrado' : 'relatórios encontrados'}</p>}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
-        <ul aria-label="Áreas, subáreas e relatórios" className="space-y-1">
+      <div className="sidebar-tree-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
+        <ul aria-label="Áreas, subáreas e relatórios" className="sidebar-areas space-y-1">
           {areas.map((area, areaIndex) => {
             const Icon = GROUP_META[area.id]?.icon ?? Folder
             const active = current?.area.id === area.id
@@ -152,7 +152,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
                       else setExpanded({ selectionKey, areaId: '', sectionId: '' })
                     })}
                     className={cn(
-                      'group/area flex min-h-11 w-full items-center gap-2.5 rounded-[4px] px-3 py-2 text-left text-[15px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                      'sidebar-area-row group/area flex min-h-11 w-full items-center gap-2.5 rounded-[4px] px-3 py-2 text-left text-[15px] font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
                       active ? 'bg-gold-wash text-primary' : areaOpen ? 'bg-white/[0.06] text-foreground' : 'text-foreground/90 hover:bg-accent hover:text-foreground',
                       collapsed && 'justify-center px-0',
                     )}
@@ -165,7 +165,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
                     </>}
                   </button>
                 </Hint>
-                <div id={areaContentId} hidden={!areaOpen} className="ml-6 border-l border-white/20 pl-2">
+                <div id={areaContentId} hidden={!areaOpen} className="sidebar-area-branch ml-6 border-l border-white/20 pl-2">
                   {areaOpen && (directReports ? renderReports(area, area.sections[0]) : (
                     <ul className="space-y-1 py-1.5">
                       {area.sections.map((section, sectionIndex) => {
@@ -182,7 +182,7 @@ export function DashboardTree({ mobile = false, onNavigate }: DashboardTreeProps
                                 else setExpanded({ selectionKey, areaId: area.id, sectionId: '' })
                               })}
                               className={cn(
-                                'flex min-h-11 w-full items-start gap-2 rounded-[4px] px-2 py-2.5 text-left text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                                'sidebar-subarea-row flex min-h-11 w-full items-start gap-2 rounded-[4px] px-2 py-2.5 text-left text-[15px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
                                 sectionActive ? 'font-semibold text-primary' : 'font-medium text-foreground/90 hover:bg-accent hover:text-foreground',
                               )}
                             >

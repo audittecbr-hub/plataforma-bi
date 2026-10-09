@@ -39,11 +39,11 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
       <div
         data-collapsed={collapsed}
         className={cn(
-          "dark group/sidebar relative flex h-full flex-col border-r bg-background text-foreground transition-[width] duration-300 ease-out-brand motion-reduce:transition-none",
+          "sidebar-panel dark group/sidebar relative flex h-full flex-col border-r bg-background text-foreground transition-[width] duration-300 ease-out-brand motion-reduce:transition-none",
           collapsed ? LARGURA_FECHADA : LARGURA_ABERTA
         )}
       >
-        <div className="relative flex h-[88px] shrink-0 items-center overflow-hidden px-6">
+        <div className="sidebar-brand relative flex h-[88px] shrink-0 items-center overflow-hidden px-6">
           <Link
             href="/dashboard"
             aria-label="Grupo Studio — início"
@@ -53,7 +53,7 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
               tone="white"
               height={38}
               priority
-              className="transition-opacity duration-200 group-data-[collapsed=true]/sidebar:pointer-events-none group-data-[collapsed=true]/sidebar:opacity-0"
+              className="sidebar-logo transition-opacity duration-200 group-data-[collapsed=true]/sidebar:pointer-events-none group-data-[collapsed=true]/sidebar:opacity-0"
             />
             <BrandSeal
               tone="white"
@@ -76,7 +76,7 @@ export function SidebarShell({ children }: { children: React.ReactNode }) {
             aria-label={collapsed ? "Expandir menu" : "Minimizar menu"}
             aria-expanded={!collapsed}
             className={cn(
-              "absolute -right-[18px] top-[26px] z-40 grid size-9 place-items-center rounded-full border bg-card text-foreground shadow-sm outline-none",
+              "sidebar-collapse absolute -right-[18px] top-[26px] z-40 grid size-9 place-items-center rounded-full border bg-card text-foreground shadow-sm outline-none",
               "transition-[color,border-color] hover:border-primary hover:text-primary focus-visible:ring-[3px] focus-visible:ring-ring/25"
             )}
           >
