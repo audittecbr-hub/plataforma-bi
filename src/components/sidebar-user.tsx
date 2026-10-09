@@ -38,7 +38,7 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
         type="submit"
         aria-label="Sair"
         className={cn(
-          "grid size-10 shrink-0 place-items-center rounded-[4px] text-muted-foreground outline-none transition-colors",
+          "sidebar-logout-button grid size-10 shrink-0 place-items-center rounded-[4px] text-muted-foreground outline-none transition-colors",
           "hover:bg-accent hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/25"
         )}
       >
@@ -48,10 +48,10 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
   )
 
   return (
-    <div className={cn("mt-auto shrink-0", mobile ? "pt-1" : "border-t border-white/10 p-3")}>
+    <div className={cn("sidebar-user mt-auto shrink-0", mobile ? "pt-1" : "border-t border-white/10 p-3")}>
       <div
         className={cn(
-          "flex items-center gap-1 overflow-hidden rounded-xl border bg-card p-2",
+          "sidebar-account flex items-center gap-1 overflow-hidden rounded-xl border bg-card p-2",
           collapsed && "justify-center p-1"
         )}
       >
@@ -62,17 +62,17 @@ export function SidebarUser({ user, signOutAction, mobile = false, onNavigate }:
               aria-label={`Menu da conta de ${nome}`}
               title={collapsed ? `Menu da conta de ${nome}` : undefined}
               className={cn(
-                "group/account flex min-w-0 flex-1 items-center gap-3 rounded-[4px] p-1 text-left outline-none transition-colors",
+                "sidebar-account-trigger group/account flex min-w-0 flex-1 items-center gap-3 rounded-[4px] p-1 text-left outline-none transition-colors",
                 "hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/25 data-[state=open]:bg-accent",
                 collapsed && "flex-none justify-center"
               )}
             >
-              <Avatar name={user.fullName} email={user.email} size={collapsed ? 34 : 38} brand />
+              <Avatar name={user.fullName} email={user.email} size={collapsed ? 34 : 38} className="sidebar-avatar" brand />
               {!collapsed && (
                 <>
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] font-semibold leading-snug text-foreground">{nome}</span>
-                    <span className="block truncate text-[13px] leading-snug text-muted-foreground">{describeRole(user)}</span>
+                    <span className="sidebar-user-name block truncate text-[15px] font-semibold leading-snug text-foreground">{nome}</span>
+                    <span className="sidebar-user-role block truncate text-[13px] leading-snug text-muted-foreground">{describeRole(user)}</span>
                   </span>
                   <ChevronsUpDown aria-hidden className="size-[18px] shrink-0 text-muted-foreground transition-colors group-hover/account:text-primary" />
                 </>

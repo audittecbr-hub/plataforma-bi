@@ -29,7 +29,7 @@ export function SidebarNav({ mobile = false, onNavigate }: SidebarNavProps) {
           href={item.href} prefetch={true} onClick={onNavigate}
           aria-current={active ? 'page' : undefined}
           className={cn(
-            'group/item relative flex h-11 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[15px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+            'sidebar-nav-link group/item relative flex h-11 items-center gap-3 overflow-hidden rounded-[4px] pl-[17px] pr-3 text-[15px] font-bold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
             active ? 'bg-white/[0.08] text-foreground' : 'text-foreground/90 hover:bg-accent hover:text-foreground',
           )}
         >
@@ -42,7 +42,7 @@ export function SidebarNav({ mobile = false, onNavigate }: SidebarNavProps) {
   }
 
   return (
-    <nav aria-label={mobile ? 'Navegação principal no celular' : 'Navegação principal'} className="flex min-h-0 flex-1 flex-col pt-4">
+    <nav aria-label={mobile ? 'Navegação principal no celular' : 'Navegação principal'} className="sidebar-navigation flex min-h-0 flex-1 flex-col pt-4">
       <div className="shrink-0 px-3">{renderItem(NAV_ITEMS[0])}</div>
       <DashboardTree mobile={mobile} onNavigate={onNavigate} />
     </nav>
