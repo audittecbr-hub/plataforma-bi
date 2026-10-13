@@ -6,7 +6,7 @@ import { parseManifest } from '../src/lib/bi-ai/manifest'
 import { parsePublishedSchema, type FabricPart } from '../src/lib/bi-ai/fabric-schema'
 import { publishedSchema } from '../src/lib/bi-ai/fabric-context'
 
-test('published evidence ignores invented model output, reads fresh values, and rejects changed reports', async () => {
+test('published evidence ignores invented output; new filters and changed reports use live analysis', async () => {
   const originalFetch = globalThis.fetch
   const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://evidence-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key-long-enough-for-clarification',
     OPENCODE_API_KEY: 'test-provider-key', POWERBI_TENANT: 'test-tenant', POWERBI_CLIENT_ID: 'test-client', POWERBI_CLIENT_SECRET: 'test-secret' }
@@ -30,7 +30,7 @@ test('published evidence ignores invented model output, reads fresh values, and 
     reportReferences: [{ version: 1, modelHash: schema.modelHash, reportHash: schema.reportHash, measure: 'Card', page: 'HOME',
       source: { kind: 'static-html' }, notes: [], metrics: [{ id: 'revenue', label: 'Receita realizada', aliases: ['receita'], format: 'currency',
         expression: { op: 'html-text', label: 'REALIZADO', slot: 'currency' } }] }] })
-  let definitions = 0, reads = 0, calls = 0, changed = false, turns = 0, logs = 0, refreshVersion = 'v1', refreshDuringQuery = false, memoryFailure = false
+  let definitions = 0, reads = 0, calls = 0, changed = false, turns = 0, logs = 0, refreshVersion = 'v1', refreshDuringQuery = false, memoryFailure = false, toolMode = false
   try {
     globalThis.fetch = async (input, init) => {
       const url = String(input)
@@ -48,6 +48,11 @@ test('published evidence ignores invented model output, reads fresh values, and 
         const body = JSON.parse(String(init?.body))
         assert.equal(body.reasoning_effort, 'max')
         assert.equal(body.max_tokens, 393216)
+        if (body.messages[0].content.startsWith('Planeje DAX')) return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant',
+          content: JSON.stringify(toolMode ? { action: 'report-facts', mode: 'answer', requests: [
+            { measure: 'Card', metricIds: ['revenue'], scope: { months: ['2026-10'], region: null } },
+            { measure: 'Card2', metricIds: ['expense'], scope: { months: ['2026-10'], region: null } },
+          ] } : { answerable: true, queries: [{ purpose: 'Consulta nova ao modelo', dax: 'EVALUATE ROW("Receita", COUNTROWS(\'Fato\'))', maxRows: 1 }] }) } }] })
         return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({
           factIds: ['invented'], comparisons: [{ left: 'f0', right: 'invented' }], answer: 'Receita: R$ 999.999,99',
         }) } }], usage: { total_tokens: 10 } })
@@ -56,6 +61,7 @@ test('published evidence ignores invented model output, reads fresh values, and 
         reads++
         if (refreshDuringQuery) refreshVersion = 'v2'
         const query = JSON.parse(String(init?.body)).queries[0].query as string
+        if (!query.includes('ReportReference')) return json({ results: [{ tables: [{ rows: [{ '[Receita]': 123.45 }] }] }] })
         if (memoryFailure && query.includes('"ReportReference1",') && query.includes('"ReportReference",')) {
           memoryFailure = false
           return new Response(JSON.stringify({ error: { code: 'Resource Governance', message: 'memory limit' } }), { status: 400 })
@@ -81,17 +87,18 @@ test('published evidence ignores invented model output, reads fresh values, and 
     assert('answer' in second && typeof second.answer === 'string' && second.answer.includes('321,00'))
     assert.equal(definitions, 4)
     const unknown = await work('Qual receita realizada em 2026 para o cliente ACME?')
-    assert('clarification' in unknown)
-    assert.equal(reads, 2)
-    assert.equal(calls, 2)
+    assert('answer' in unknown && unknown.answer?.includes('123,45'))
+    assert.equal(reads, 3)
+    assert.equal(calls, 3)
     refreshDuringQuery = true
     await assert.rejects(work(), /atualização do modelo mudou/)
     refreshDuringQuery = false
     changed = true
-    await assert.rejects(work(), error => error instanceof Error && 'code' in error && error.code === 'REPORT_REFERENCE_INVALID')
-    assert.equal(reads, 3)
-    assert.equal(turns, 2)
-    assert.equal(logs, 3)
+    const changedResult = await work()
+    assert('answer' in changedResult && changedResult.answer?.includes('123,45'))
+    assert.equal(reads, 5)
+    assert.equal(turns, 4)
+    assert.equal(logs, 5)
     changed = false
     memoryFailure = true
     const firstReference = (manifest.raw.reportReferences as Record<string, unknown>[])[0]
@@ -108,7 +115,18 @@ test('published evidence ignores invented model output, reads fresh values, and 
     assert('evidence' in multiResult && multiResult.evidence)
     assert.deepEqual(multiResult.evidence.values.map(fact => fact.value), [321, 42])
     assert.equal(multiResult.queries.length, 2)
-    assert.equal(reads, 6)
+    assert.equal(reads, 8)
+    toolMode = true
+    const selectedByModel = await withAiRequestCache(() => answerBiQuestion({ manifest: multi,
+      dashboard: { id: '44444444-4444-4444-8444-444444444444', name: 'BI de teste', department: 'Diretoria', allowed_departments: [], assigned_user_id: null, sub_group: null },
+      userId: '55555555-5555-4555-8555-555555555555', isAdmin: false, conversationId: null, message: 'Mostre duas leituras inéditas da tela em outubro de 2026',
+      audit: { configuration: { provedorId: 'opencode-go', modelo: 'deepseek-v4.1-flash', enabled: true, reasoningEffort: 'max', fonte: 'banco' },
+        takeRateLimit: async () => {}, resolveConversation: async () => '66666666-6666-4666-8666-666666666666', previousTurns: async () => [],
+        recordTurn: async () => {}, recordQueryLog: async () => {} } }))
+    assert('evidence' in selectedByModel && selectedByModel.evidence)
+    assert.deepEqual(selectedByModel.evidence.values.map(fact => fact.value), [321, 42])
+    assert('answer' in selectedByModel && selectedByModel.answer?.includes('### 📂 Card'))
+    assert.equal(reads, 10)
   } finally {
     globalThis.fetch = originalFetch
     for (const name of Object.keys(env)) {

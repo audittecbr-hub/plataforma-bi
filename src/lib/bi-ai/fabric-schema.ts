@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
 import { asRecord, safeMetadataText, safeText, type BiManifest } from './manifest'
 import type { SelectedContext } from './context'
+import { sourceVariables, type DaxSemanticSource } from './dax-source'
 
 export interface FabricPart { path: string; payload: string; payloadType: string }
-export interface PublishedMeasure { name: string; table: string; expression: string }
+export interface PublishedMeasure { name: string; table: string; expression: string; semanticSource?: DaxSemanticSource }
 export interface PublishedColumn { name: string; table: string }
 export interface PublishedPageMap {
   name: string
@@ -61,10 +62,18 @@ function measureBlocks(text: string, table: string): PublishedMeasure[] {
     for (let next = index + 1; next < lines.length && lines[next].startsWith('\t\t\t'); next++) {
       formula.push(lines[next].trim())
     }
-    const joined = formula.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim()
-    const safe = joined.length <= 650 && !/<\s*(?:div|html|style|script|svg)|data:image|base64|https?:\/\/|\b(?:Sql|PostgreSQL|Odbc|OData)\.Database|(?:server|password|client_secret)\s*=/i.test(joined)
+    const definition = formula.filter(Boolean).join('\n').trim()
+    const joined = definition.replace(/\s+/g, ' ')
+    const safe = joined.length <= 20_000 && !/<\s*(?:div|html|style|script|svg)|data:image|base64|https?:\/\/|\b(?:Sql|PostgreSQL|Odbc|OData)\.Database|(?:server|password|client_secret)\s*=/i.test(joined)
       ? joined : ''
-    found.push({ name, table, expression: safe })
+    const variables = sourceVariables(definition)
+    const comments = [...definition.matchAll(/\/\*([\s\S]*?)\*\//g)].slice(0, 12).map(match => safeMetadataText(match[1], 1800)).filter(Boolean)
+    // Business definitions also live in visual tooltips; read their text without executing markup or JavaScript.
+    const visualRules = [...definition.matchAll(/data-tip-t='([^']+)'\s+data-tip='([^']+)'/g)]
+      .map(match => safeMetadataText(`${match[1]}: ${match[2].replaceAll('\\n', ' ')}`, 1000)).filter(Boolean)
+    const description = [...comments, ...new Set(visualRules)].join('\n').slice(0, 14000)
+    found.push({ name, table, expression: safe,
+      ...(variables.length ? { semanticSource: { measure: name, table, description, variables } } : {}) })
   }
   return found
 }
@@ -259,7 +268,19 @@ export function withPublishedSchema(context: SelectedContext, manifest: BiManife
   const allowedColumns = new Set(manifest.tables.filter((item) => item.queryable)
     .flatMap((table) => table.columns.filter((column) => column.queryable && !column.restricted && !column.presentationOnly)
       .map((column) => `${table.name}[${column.name}]`.toLowerCase())))
+  const primary = new Set((Array.isArray(manifest.raw.reportReferences) ? manifest.raw.reportReferences : [])
+    .map(reference => asRecord(reference).measure).filter((name): name is string => typeof name === 'string'))
+  let sourceChars = 0
+  const semanticSources = published.measures.filter(measure => manifest.tables.some(table => table.queryable && table.name === measure.table))
+    .flatMap(measure => measure.semanticSource ? [structuredClone(measure.semanticSource)] : [])
+    .sort((a, b) => Number(primary.has(b.measure)) - Number(primary.has(a.measure)))
+    .map(source => {
+      const size = JSON.stringify(source).length
+      if (sourceChars + size <= 60_000) { sourceChars += size; return source }
+      return { ...source, description: source.description.slice(0, 2000), variables: source.variables.map(variable => ({ ...variable, expression: '' })) }
+    })
   const result: SelectedContext = { ...context, measures,
+    semanticSources,
     availableMeasures: published.measures.filter((item) => allowedMeasures.has(item.name.toLowerCase())).map((item) => item.name),
     availableDimensions: published.columns.filter((item) => allowedColumns.has(`${item.table}[${item.name}]`.toLowerCase()))
       .map((item) => `${item.table}[${item.name}]`),
@@ -280,6 +301,11 @@ export function withPublishedSchema(context: SelectedContext, manifest: BiManife
     source: 'Definição atual do modelo e relatório publicados no Fabric',
   }
   while (JSON.stringify(result).length > maxContextChars) {
+    const source = result.semanticSources?.findLast(source => source.variables.some(variable => variable.expression))
+    if (source) {
+      source.variables = source.variables.map(variable => ({ ...variable, expression: '' }))
+      continue
+    }
     const formula = result.measures.findLast((item) => item.publishedExpression)
     if (formula) { formula.publishedExpression = undefined; continue }
     if (result.availableDimensions.length) result.availableDimensions.pop()

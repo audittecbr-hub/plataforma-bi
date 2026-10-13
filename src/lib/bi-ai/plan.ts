@@ -1,13 +1,15 @@
 import { asRecord, safeText, type BiManifest } from './manifest'
 import type { SelectedContext } from './context'
-import { validateDax } from './dax-guard'
+import { prepareSemanticQuery } from './semantic-query'
 import type { ClarificationPrompt } from './clarification'
 import { normalizeTerm } from './context'
+import type { ReportScope } from './report-evidence'
 
 export interface PlannedQuery {
   purpose: string
   dax: string
   maxRows: number
+  sourceMeasure?: string
 }
 
 export interface QueryPlan {
@@ -19,6 +21,13 @@ export interface QueryPlan {
   assumptions: string[]
   clarification?: ClarificationPrompt
   inspect?: string[]
+  catalogSearch?: string[]
+  modelInfo?: boolean
+  exploratory?: boolean
+  reportRequests?: { measure: string; metricIds: string[]; scope: ReportScope }[]
+  reportExploratory?: boolean
+  reviewed?: boolean
+  answerResults?: { index: number; title: string; limit?: number; sort?: { field: string; descending: boolean }; fields?: string[] }[]
 }
 
 function parseObject(text: string): Record<string, unknown> {
@@ -47,6 +56,42 @@ export function metadataOnlyQuestion(question: string): boolean {
 
 export function parsePlan(text: string, context: SelectedContext, manifest: BiManifest, question: string): QueryPlan {
   const raw = parseObject(text)
+  if (raw.action === 'model-info') return { answerable: true, intent: 'Definições do modelo publicado', reason: '', objectsUsed: [],
+    queries: [], assumptions: [], modelInfo: true }
+  if (raw.action === 'search-catalog') {
+    const terms = Array.isArray(raw.terms) ? raw.terms.map(term => safeText(term, 200)).filter(Boolean).slice(0, 12) : []
+    if (!terms.length) throw new Error('Informe o que procurar no catálogo completo do modelo.')
+    return { answerable: false, intent: 'Pesquisar o catálogo completo', reason: '', objectsUsed: [], queries: [], assumptions: [], catalogSearch: terms }
+  }
+  if (raw.action === 'answer-from-results') {
+    if (!Array.isArray(raw.results) || !raw.results.length || raw.results.length > 100) throw new Error('Selecione os resultados consultados que respondem à pergunta.')
+    const answerResults = raw.results.map(value => {
+      const item = asRecord(value), order = asRecord(item.sort)
+      if (!Number.isInteger(item.index) || Number(item.index) < 0 || item.limit !== undefined && (!Number.isInteger(item.limit) || Number(item.limit) < 1)
+        || item.fields !== undefined && (!Array.isArray(item.fields) || item.fields.some(field => typeof field !== 'string'))) throw new Error('Seleção de resultados inválida.')
+      return { index: Number(item.index), title: safeText(item.title, 1000) || 'Dados conferidos',
+        ...(typeof item.limit === 'number' ? { limit: item.limit } : {}),
+        ...(typeof order.field === 'string' ? { sort: { field: order.field, descending: order.descending !== false } } : {}),
+        ...(Array.isArray(item.fields) ? { fields: item.fields as string[] } : {}) }
+    })
+    return { answerable: true, intent: 'Responder com dados já consultados', reason: '', objectsUsed: [], queries: [], assumptions: [], answerResults }
+  }
+  if (raw.action === 'report-facts') {
+    if (!Array.isArray(raw.requests) || !raw.requests.length || raw.requests.length > 30) throw new Error('Informe as fontes dos indicadores solicitados.')
+    const reportRequests = raw.requests.map(value => {
+      const request = asRecord(value), scope = asRecord(request.scope)
+      if (typeof request.measure !== 'string' || !Array.isArray(request.metricIds) || !request.metricIds.length
+        || request.metricIds.some(id => typeof id !== 'string') || !Array.isArray(scope.months) || !scope.months.length
+        || scope.months.some(month => typeof month !== 'string' || !/^20\d{2}-(?:0[1-9]|1[0-2])$/.test(month))
+        || scope.region !== undefined && scope.region !== null && typeof scope.region !== 'string'
+        || scope.products !== undefined && scope.products !== null) throw new Error('Fonte ou recorte do indicador inválido. Para outros filtros, use DAX.')
+      return { measure: request.measure, metricIds: request.metricIds as string[], scope: {
+        months: scope.months as string[], region: typeof scope.region === 'string' ? scope.region : null, products: null,
+      } }
+    })
+    return { answerable: true, intent: 'Indicadores publicados', reason: '', objectsUsed: [], queries: [], assumptions: [], reportRequests,
+      reportExploratory: raw.mode === 'explore' }
+  }
   if (raw.action === 'inspect') {
     const inspect = Array.isArray(raw.inspect)
       ? [...new Set(raw.inspect.map((item) => safeText(item, 200)).filter(Boolean))].slice(0, 12) : []
@@ -54,10 +99,11 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
     return { answerable: false, intent: 'Inspecionar modelo publicado', reason: '',
       objectsUsed: [], queries: [], assumptions: [], inspect }
   }
+  if (raw.action === 'explore') raw.answerable = true
   if (typeof raw.answerable !== 'boolean') throw new Error('Plano sem answerable.')
-  const queryLimit = manifest.policy.maxQueries
-  const detail = /lista|liste|detalh|top\s*\d|ranking/i.test(question)
-  const rowLimit = detail ? manifest.policy.maxRows : Math.min(100, manifest.policy.maxRows)
+  const queryLimit = 100
+  // The model can ask for more detail than the old prompt default; Power BI caps one result at 100k rows.
+  const rowLimit = 100_000
   const objectsUsed = Array.isArray(raw.objectsUsed)
     ? raw.objectsUsed.filter((item): item is string => typeof item === 'string').slice(0, 50) : []
   if (!raw.answerable) {
@@ -86,10 +132,11 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
     // and row limit as the verbose form.
     const row = typeof item === 'string' ? { dax: item } : asRecord(item)
     const dax = typeof row.dax === 'string' ? row.dax.trim() : ''
-    const requested = Number.isInteger(row.maxRows) ? row.maxRows as number : rowLimit
+    const requested = Number.isInteger(row.maxRows) ? row.maxRows as number : manifest.policy.maxRows
     const maxRows = Math.min(Math.max(requested, 1), rowLimit)
-    validateDax(dax, context, manifest, maxRows)
-    return { purpose: safeText(row.purpose, 160) || 'Consulta', dax, maxRows }
+    const sourceMeasure = typeof row.sourceMeasure === 'string' ? row.sourceMeasure.trim() : undefined
+    const prepared = prepareSemanticQuery({ dax, maxRows, sourceMeasure, context, manifest })
+    return { purpose: safeText(row.purpose, 1000) || 'Consulta', dax: prepared.body, maxRows, ...(sourceMeasure ? { sourceMeasure } : {}) }
   })
   if (!queries.length && !metadataOnlyQuestion(question)) {
     throw new Error('Uma resposta sobre dados precisa consultar o modelo Power BI com DAX.')
@@ -100,8 +147,9 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
     reason: safeText(raw.reason, 300),
     objectsUsed,
     queries,
+    ...(raw.action === 'explore' ? { exploratory: true } : {}),
     assumptions: Array.isArray(raw.assumptions)
-      ? raw.assumptions.map((item) => safeText(item, 150)).filter(Boolean).slice(0, 5) : [],
+      ? raw.assumptions.map((item) => safeText(item, 4000)).filter(Boolean).slice(0, 30) : [],
   }
 }
 
@@ -110,12 +158,11 @@ export function trimResults(rows: Record<string, unknown>[], maxRows: number) {
   let bytes = 0
   for (const row of rows.slice(0, maxRows)) {
     const output: Record<string, string | number | boolean | null> = {}
-    for (const [key, value] of Object.entries(row).slice(0, 20)) {
-      if (value === null || typeof value === 'number' || typeof value === 'boolean') output[key.slice(0, 120)] = value
-      else if (typeof value === 'string') output[key.slice(0, 120)] = safeText(value, 250)
+    for (const [key, value] of Object.entries(row)) {
+      if (value === null || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') output[key] = value
     }
     const size = JSON.stringify(output).length
-    if (trimmed.length && bytes + size > 8000) break
+    if (trimmed.length && bytes + size > 2_000_000) break
     trimmed.push(output)
     bytes += size
   }

@@ -1,5 +1,6 @@
 import { asRecord, safeText, type BiManifest, type BiObject, type BiTable } from './manifest'
 import { validateDax } from './dax-guard'
+import type { DaxSemanticSource } from './dax-source'
 
 export function normalizeTerm(value: string): string {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
@@ -52,10 +53,12 @@ function selected<T extends { name: string; description?: string; synonyms?: str
 export interface SelectedContext {
   source?: string
   publishedVisuals?: string[]
+  semanticSources?: DaxSemanticSource[]
   business: string
   businessRules: string[]
   availableMeasures: string[]
   availableDimensions: string[]
+  availableTables?: string[]
   tables: Pick<BiTable, 'name' | 'description' | 'fact'>[]
   measures: BiObject[]
   columns: BiObject[]
@@ -87,6 +90,7 @@ export function compactContextForPlanner(context: SelectedContext, inspected: st
     businessRules: context.businessRules.map((rule) => rule.slice(0, 220)).slice(0, 8),
     availableMeasures: context.availableMeasures,
     availableDimensions: context.availableDimensions,
+    availableTables: context.availableTables,
     tables: context.tables.map((table) => ({ name: table.name, fact: table.fact,
       description: table.description.slice(0, requested.has(normalizeTerm(table.name)) ? 1500 : 180) })),
     measures: context.measures.map((measure) => ({
@@ -105,7 +109,10 @@ export function compactContextForPlanner(context: SelectedContext, inspected: st
     reportMap: context.reportMap.slice(0, 8).map((page) => page.slice(0, 200)),
     examples: context.examples.slice(0, 1),
     ambiguities: context.ambiguities.slice(0, 3),
-    policy: context.policy,
+    policy: { ...context.policy, maxRows: 100_000, maxQueries: 100 },
+    semanticSources: context.semanticSources?.map(source => ({ measure: source.measure, table: source.table,
+      description: source.description.slice(0, 650), ...(requested.has(normalizeTerm(source.measure)) || source.variables.some(variable => variable.expression)
+        ? { variables: source.variables } : {}) })),
   }
 }
 
@@ -114,6 +121,7 @@ export function fullContextForPlanner(context: SelectedContext) {
   return {
     business: context.business, businessRules: context.businessRules,
     availableMeasures: context.availableMeasures, availableDimensions: context.availableDimensions,
+    availableTables: context.availableTables,
     tables: context.tables,
     measures: context.measures.map(measure => ({
       name: measure.name, table: measure.table, description: measure.description,
@@ -128,8 +136,16 @@ export function fullContextForPlanner(context: SelectedContext) {
       description: column.description, dataType: column.dataType, aggregatable: column.aggregatable,
       synonyms: column.synonyms.length ? column.synonyms : undefined })),
     relationships: context.relationships, reportMap: context.reportMap,
-    examples: context.examples, ambiguities: context.ambiguities, policy: context.policy,
+    examples: context.examples, ambiguities: context.ambiguities, policy: { ...context.policy, maxRows: 100_000, maxQueries: 100 },
+    semanticSources: sourcesForPlanner(context),
   }
+}
+
+function sourcesForPlanner(context: SelectedContext) {
+  return context.semanticSources?.map(source => source.variables.some(variable => variable.expression) ? source : {
+    measure: source.measure, table: source.table, description: source.description.slice(0, 650),
+    variables: source.variables.map(variable => ({ name: variable.name })),
+  })
 }
 
 /** Preload complete, authorized metadata when it fits comfortably in the planner. */
@@ -288,6 +304,7 @@ export function selectContext(manifest: BiManifest, question: string, isAdmin: b
     availableMeasures: manifest.measures.filter((measure) => measure.queryable && !measure.restricted && !measure.presentationOnly)
       .map((measure) => measure.name).slice(0, 200),
     availableDimensions: allColumns.map((column) => `${column.table}[${column.name}]`).slice(0, 200),
+    availableTables: queryable.map(table => table.name),
     tables: tables.map(({ name, description, fact }) => ({ name, description: description.slice(0, 420), fact })),
     measures,
     columns: columns.map((column) => ({ ...column, description: column.description.slice(0, 300) })),
@@ -365,12 +382,10 @@ export function inspectCatalog(context: SelectedContext, manifest: BiManifest, n
     else if (tables[index].description.length < table.description.length) { tables[index] = table; changed = true }
     if (!includeMembers) return
     for (const column of table.columns) {
-      if (columns.length >= context.columns.length + 16) break
       if (column.queryable && !column.presentationOnly && (context.allowRestricted || !column.restricted)
         ) addColumn(column)
     }
     for (const measure of manifest.measures) {
-      if (measures.length >= context.measures.length + 16) break
       if (measure.table === table.name && measure.queryable && !measure.presentationOnly
         && (context.allowRestricted || !measure.restricted) && !measures.includes(measure)) {
         measures.push(measure)

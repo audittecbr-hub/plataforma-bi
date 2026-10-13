@@ -327,10 +327,10 @@ test('planner caps queries and refuses unanswerable questions without DAX', () =
   const no = parsePlan(JSON.stringify({ answerable: false, reason: 'sem dados', queries: [] }), context, manifest, 'clima')
   assert.equal(no.queries.length, 0)
   assert.equal(no.queries.length, 0)
-  const tooMany = { answerable: true, queries: Array.from({ length: 6 }, () => ({
+  const tooMany = { answerable: true, queries: Array.from({ length: 101 }, () => ({
     purpose: 'total', dax: 'EVALUATE ROW("Receita", [Receita Líquida])', maxRows: 100,
   })) }
-  assert.throws(() => parsePlan(JSON.stringify(tooMany), context, manifest, 'receita'), /no máximo 5/)
+  assert.throws(() => parsePlan(JSON.stringify(tooMany), context, manifest, 'receita'), /no máximo 100/)
   // Pergunta sobre o próprio relatório: plano respondível sem executar DAX.
   const semConsulta = parsePlan(JSON.stringify({ answerable: true, intent: 'Explicar o relatório', queries: [] }),
     context, manifest, 'o que tem na página de departamentos?')

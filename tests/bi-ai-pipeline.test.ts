@@ -6,7 +6,7 @@ import { parseManifest } from '../src/lib/bi-ai/manifest'
 
 test('parallel BI pipeline preserves verification, auditing and failure handling', async () => {
   const originalFetch = globalThis.fetch
-  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://pipeline-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key',
+  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://pipeline-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key-long-enough-for-analysis',
     OPENCODE_API_KEY: 'test-provider-key', POWERBI_TENANT: 'test-tenant', POWERBI_CLIENT_ID: 'test-client', POWERBI_CLIENT_SECRET: 'test-secret' }
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
   Object.assign(process.env, env)
@@ -28,7 +28,8 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
         if (url.includes('gs_ia_provider_config')) { providerReads++; return json([]) }
         if (url.includes('/rpc/gs_bi_take_rate_limit')) return json(true)
         if (url.includes('gs_bi_conversations')) return json(init?.method === 'POST'
-          ? { id: '44444444-4444-4444-8444-444444444444' } : null)
+          ? { id: '44444444-4444-4444-8444-444444444444' } : { id: '44444444-4444-4444-8444-444444444444',
+            user_id: '66666666-6666-4666-8666-666666666666', dashboard_id: '55555555-5555-4555-8555-555555555555' })
         if (url.includes('gs_chat_log')) {
           if (init?.method === 'POST') { savedTurns++; return json(null) }
           return json([])
@@ -38,6 +39,7 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
           return json(null)
         }
         if (url.includes('login.microsoftonline.com')) return json({ access_token: 'test-access-token', expires_in: 3600 })
+        if (url.includes('/refreshes?')) return json({ value: [{ requestId: 'v1', status: 'Completed', startTime: '2026-10-13T00:00:00Z' }] })
         if (url.includes('/getDefinition')) return json({ definition: { parts: [{
           path: 'definition/tables/Fato.tmdl', payloadType: 'InlineBase64',
           payload: Buffer.from('table Fato\n\tcolumn Valor\n\tmeasure Receita = SUM(Fato[Valor])').toString('base64'),
@@ -76,7 +78,8 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
       else {
         const answer = await work()
         assert('answer' in answer)
-        assert.equal(answer.answer, '### 📊 Resultados do Power BI\n\n### 🔎 Consulta 0\n\n- **Receita0:** 123\n\n### 🔎 Consulta 1\n\n- **Receita1:** 123\n\n### 🔎 Consulta 2\n\n- **Receita2:** 123')
+        assert(answer.answer?.startsWith('### 📊 Resultados do Power BI\n\n### 🔎 Consulta 0\n\n- **Receita0:** 123\n\n### 🔎 Consulta 1\n\n- **Receita1:** 123\n\n### 🔎 Consulta 2\n\n- **Receita2:** 123'))
+        assert(answer.answer?.includes('### 🧾 Fonte e filtros'))
         assert.deepEqual(answer.queries.map(query => query.purpose), ['Consulta 0', 'Consulta 1', 'Consulta 2'])
       }
       assert.equal(queries, 3)

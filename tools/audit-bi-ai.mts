@@ -42,7 +42,7 @@ async function main() {
         dashboard, manifest: await manifestForDashboard(dashboard), userId: randomUUID(), conversationId: null,
         isAdmin: false, message: item.question, signal: AbortSignal.timeout(270_000),
         audit: { configuration: { ...configuration, enabled: true },
-          takeRateLimit: async () => {}, resolveConversation: async () => randomUUID(), previousTurns: async () => [],
+          takeRateLimit: async () => {}, resolveConversation: async (_, __, id) => id ?? randomUUID(), previousTurns: async () => [],
           recordTurn: async turn => { modelTokens += turn.tokens }, recordQueryLog: async () => {} },
       }))
       const expected = item.expected

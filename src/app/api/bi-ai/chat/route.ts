@@ -16,13 +16,15 @@ export async function POST(request: Request): Promise<Response> {
 
 async function answerRequest(request: Request): Promise<Response> {
   try {
-    const body = await readJsonBody(request, 8192)
+    const body = await readJsonBody(request, 1_100_000)
     if (['workspaceId', 'datasetId', 'semanticModelId', 'reportId'].some((key) => key in body)) {
       throw new BiAiError(400, 'UNTRUSTED_ID', 'IDs do Power BI não são aceitos nesta rota.')
     }
     if (typeof body.dashboardId !== 'string' || typeof body.message !== 'string'
       || (body.conversationId !== undefined && body.conversationId !== null && typeof body.conversationId !== 'string')
-      || (body.clarificationToken !== undefined && (typeof body.clarificationToken !== 'string' || body.clarificationToken.length > 5000))
+      || (body.clarificationToken !== undefined && (typeof body.clarificationToken !== 'string' || body.clarificationToken.length > 32000))
+      || (body.continuationToken !== undefined && (typeof body.continuationToken !== 'string' || body.continuationToken.length > 1_000_000))
+      || (body.continuationToken && !body.conversationId)
       || (body.clarificationToken && !body.conversationId)) {
       throw new BiAiError(400, 'INVALID_INPUT', 'Informe dashboardId, conversationId opcional e message.')
     }
@@ -33,6 +35,8 @@ async function answerRequest(request: Request): Promise<Response> {
       dashboard, manifest, userId: user.id, isAdmin: profile?.is_admin === true,
       conversationId: typeof body.conversationId === 'string' ? body.conversationId : null, message: body.message as string,
       clarificationToken: typeof body.clarificationToken === 'string' ? body.clarificationToken : null,
+      continuationToken: typeof body.continuationToken === 'string' ? body.continuationToken : null,
+      yieldAnalysis: request.headers.get('x-bi-ai-continuation') === '1',
       signal, onProgress,
       })
     }

@@ -103,10 +103,10 @@ async function load(workspaceId: string, semanticModelId: string, signal?: Abort
 }
 
 /** Catálogo do modelo publicado, cacheado por instância de servidor. */
-export function liveCatalog(workspaceId: string, semanticModelId: string, signal?: AbortSignal): Promise<LiveCatalog> {
+export function liveCatalog(workspaceId: string, semanticModelId: string, signal?: AbortSignal, forceFresh = false): Promise<LiveCatalog> {
   const key = `${workspaceId}:${semanticModelId}`
   const cached = cache.get(key)
-  if (cached && cached.expiresAt > Date.now()) return cached.promise
+  if (!forceFresh && cached && cached.expiresAt > Date.now()) return cached.promise
   const promise = load(workspaceId, semanticModelId, signal)
   cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise })
   promise.catch(() => { if (cache.get(key)?.promise === promise) cache.delete(key) })
