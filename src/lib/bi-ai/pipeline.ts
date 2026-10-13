@@ -8,6 +8,8 @@ import { executeDaxQuery, PowerBiQueryError, powerBiUserMessage } from '@/lib/po
 import { BiAiError, type DashboardRow } from './access'
 import { compactContextForPlanner, expandContextFromPlan, fullContextForPlanner, inspectCatalog, normalizeTerm, preloadPlannerContext, selectContext, type SelectedContext } from './context'
 import { mapConcurrent } from './concurrency'
+import { answerFromReportReference } from './report-reference'
+import { ReportEvidenceError } from './report-evidence'
 import { validateDax } from './dax-guard'
 import { certifiedPlan, certifiedScopeMessage, CertifiedQueryError } from './certified'
 import { publishedSchema } from './fabric-context'
@@ -15,12 +17,22 @@ import { PublishedSchemaError, withPublishedSchema, type PublishedSchema } from 
 import { basicClarification, clarificationKey, ClarificationError,
   continueClarification, issueClarificationToken, readClarificationToken,
   type ClarificationPrompt } from './clarification'
-import { previousTurns, recordQueryLog, recordTurn, resolveConversation, takeRateLimit } from './conversations'
+import { previousTurns, recordQueryLog as persistQueryLog, recordTurn, resolveConversation, takeRateLimit } from './conversations'
 import { type BiManifest } from './manifest'
 import { answerIsGrounded, normalizeGroupedRows, parseAnswer, parsePlan, prepareGroupedExecution,
-  trimResults, type PlannedQuery, type QueryPlan } from './plan'
+  trimResults, metadataOnlyQuestion, type PlannedQuery, type QueryPlan } from './plan'
 
 const MAX_MESSAGE = 500
+
+/** Internal QA storage adapter; HTTP routes never accept this from the browser. */
+export interface BiAuditServices {
+  configuration: ConfigIa
+  takeRateLimit: typeof takeRateLimit
+  resolveConversation: typeof resolveConversation
+  previousTurns: typeof previousTurns
+  recordTurn: typeof recordTurn
+  recordQueryLog: typeof persistQueryLog
+}
 
 function formatarValor(value: unknown): string {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -76,8 +88,9 @@ async function saveTurn(input: {
   userId: string; dashboard: DashboardRow; conversationId: string; message: string; answer: string
   queries: { purpose: string; dax: string; rowCount: number }[]
   provider: string; model: string; tokens: number; started: number
+  audit?: BiAuditServices
 }) {
-  await recordTurn({
+  await (input.audit?.recordTurn ?? recordTurn)({
     userId: input.userId, dashboardId: input.dashboard.id,
     conversationId: input.conversationId, dashboardName: input.dashboard.name,
     question: input.message, answer: input.answer, queries: input.queries,
@@ -95,13 +108,15 @@ export async function answerBiQuestion(input: {
   message: string
   clarificationToken?: string | null
   signal?: AbortSignal
+  audit?: BiAuditServices
 }) {
   const started = Date.now()
   const incomingMessage = input.message.trim()
   if (!incomingMessage || incomingMessage.length > MAX_MESSAGE) {
     throw new BiAiError(400, 'INVALID_MESSAGE', `A pergunta deve ter de 1 a ${MAX_MESSAGE} caracteres.`)
   }
-  const config = await lerConfigIa()
+  const config = input.audit?.configuration ?? await lerConfigIa()
+  const recordQueryLog = input.audit?.recordQueryLog ?? persistQueryLog
   const provider = obterProvedor(config.provedorId)
   if (!config.enabled) throw new BiAiError(409, 'AI_DISABLED', 'O Chat IA está desativado pelo administrador.')
   let keyReady = false
@@ -111,8 +126,8 @@ export async function answerBiQuestion(input: {
     || !(await modelEnabled(provider.id, config.modelo))) {
     throw new BiAiError(409, 'AI_NOT_CONFIGURED', 'O provedor de IA escolhido ainda não tem chave configurada.')
   }
-  await takeRateLimit(input.userId)
-  const conversationId = await resolveConversation(input.userId, input.dashboard.id, input.conversationId)
+  await (input.audit?.takeRateLimit ?? takeRateLimit)(input.userId)
+  const conversationId = await (input.audit?.resolveConversation ?? resolveConversation)(input.userId, input.dashboard.id, input.conversationId)
   let message = incomingMessage
   let clarificationCount = 0
   let clarifierKey: Buffer | null = null
@@ -122,6 +137,8 @@ export async function answerBiQuestion(input: {
     catch { throw new BiAiError(503, 'CLARIFICATION_UNAVAILABLE', 'Esclarecimentos do Chat indisponíveis.') }
   }
   const ask = (prompt: ClarificationPrompt, original: string, count: number) => {
+    if (count > 2) return { conversationId, answer: 'Não consegui confirmar o indicador e o recorte com segurança. Refaça a pergunta com indicador, período e filtros explícitos.',
+      queries: [], assumptions: [] }
     const token = issueClarificationToken({ userId: input.userId, dashboardId: input.dashboard.id,
       conversationId, original, count, required: prompt.required ?? [], issuedAt: Date.now() }, key())
     return { conversationId, clarification: { question: prompt.question, options: prompt.options, token },
@@ -149,8 +166,9 @@ export async function answerBiQuestion(input: {
     if (prompt) return ask(prompt, message, 1)
   }
   const [historyResult, schemaResult] = await Promise.allSettled([
-    previousTurns(conversationId),
-    publishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId),
+    (input.audit?.previousTurns ?? previousTurns)(conversationId),
+    publishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId,
+      Array.isArray(input.manifest.raw.reportReferences) && input.manifest.raw.reportReferences.length > 0),
   ])
   if (historyResult.status === 'rejected') throw historyResult.reason
   const history = historyResult.value
@@ -177,6 +195,36 @@ export async function answerBiQuestion(input: {
     }
   }
   let certified
+  const normalizedMessage = normalizeTerm(message)
+  const rawDataQuestion = /\b(?:tabelas?|registros|lancamentos|movimentos|cnpj|cpf)\b/.test(normalizedMessage)
+    || /\b(?:liste|listar|detalhamento|detalhe|detalhar|detalhes)\b/.test(normalizedMessage)
+      && /\b(?:jobs?|clientes?)\b/.test(normalizedMessage)
+  if (liveSchema && !rawDataQuestion && !metadataOnlyQuestion(message)) {
+    try {
+      const reference = await answerFromReportReference({ manifest: input.manifest, schema: liveSchema,
+        question: message, config, signal: input.signal,
+        onQuery: entry => recordQueryLog({ ...entry, userId: input.userId, dashboardId: input.dashboard.id,
+          semanticModelId: input.manifest.semanticModelId }) })
+      if (reference?.clarification) return ask(reference.clarification, message, clarificationCount + 1)
+      if (reference?.answer) {
+        await saveTurn({ ...input, conversationId, message, answer: reference.answer,
+          queries: reference.queries, provider: provider.id, model: config.modelo, tokens: reference.tokens ?? 0, started })
+        return { conversationId, answer: reference.answer,
+          queries: reference.queries.map(({ purpose, rowCount }) => ({ purpose, rowCount })),
+          assumptions: [], evidence: reference.evidence, truncated: false }
+      }
+    } catch (error) {
+      if (error instanceof ReportEvidenceError) throw new BiAiError(409, 'REPORT_REFERENCE_INVALID',
+        /atualizad|atualizacao/.test(normalizeTerm(error.message)) ? error.message
+          : 'Não consigo confirmar este indicador com o visual publicado. A referência precisa ser revalidada.')
+      throw error
+    }
+  }
+  if (!rawDataQuestion && !metadataOnlyQuestion(message)) {
+    return ask({ question: 'Qual indicador e recorte do relatório você deseja conferir? Esse pedido ainda não possui uma referência verificada.',
+      options: (input.manifest.raw.reportReferences as { metrics?: { label: string }[] }[] | undefined)
+        ?.flatMap(contract => contract.metrics?.map(metric => metric.label) ?? []).slice(0, 4) ?? [] }, message, clarificationCount + 1)
+  }
   try { certified = certifiedPlan(input.manifest, message) }
   catch (error) {
     if (error instanceof CertifiedQueryError) {
@@ -304,6 +352,11 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
       model: config.modelo, tokens: plannerTokens, started })
     return { conversationId, answer, queries: [], assumptions: [] }
   }
+  if (plan.queries.length && !rawDataQuestion) {
+    return ask({ question: 'Qual indicador e recorte do relatório você deseja conferir? Não tenho uma referência validada para esse pedido.',
+      options: (input.manifest.raw.reportReferences as { metrics?: { label: string }[] }[] | undefined)
+        ?.flatMap(contract => contract.metrics?.map(metric => metric.label) ?? []).slice(0, 4) ?? [] }, message, clarificationCount + 1)
+  }
 
   const queryResults: { query: PlannedQuery; rows: Record<string, unknown>[]; truncated: boolean; rowCount: number }[] = []
   async function repairQuery(failed: PlannedQuery, cause: PowerBiQueryError) {
@@ -332,7 +385,7 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
         const raw = await executeDaxQuery({ workspaceId: input.manifest.workspaceId,
           semanticModelId: input.manifest.semanticModelId, dax: execution.dax, signal: input.signal })
         const normalized = normalizeGroupedRows(raw, execution, message)
-        const result = trimResults(normalized.rows.slice(0, candidate.maxRows), candidate.maxRows)
+        const result = trimResults(normalized.rows, candidate.maxRows)
         if (normalized.blankGroupsExcluded) blankGroupsExcluded = true
         await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id,
           semanticModelId: input.manifest.semanticModelId, dax: execution.dax,
@@ -362,7 +415,7 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
         signal: input.signal,
       })
       const normalized = normalizeGroupedRows(raw, execution, message)
-      const result = trimResults(normalized.rows.slice(0, query.maxRows), query.maxRows)
+      const result = trimResults(normalized.rows, query.maxRows)
       if (normalized.blankGroupsExcluded) blankGroupsExcluded = true
       await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id,
         semanticModelId: input.manifest.semanticModelId, dax: execution.dax,
@@ -399,6 +452,14 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
     truncated: result.truncated,
     types: Object.fromEntries(Object.entries(result.rows[0] ?? {}).map(([key, value]) => [key, typeof value])),
   }))
+  // Row/field association is authoritative; a generated paragraph must not attach one row's amount to another entity.
+  if (!semConsulta && rawDataQuestion) {
+    const answer = resumoLegivel(dataForAnswer)
+    await saveTurn({ ...input, conversationId, message, answer, queries: queryMeta,
+      provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
+    return { conversationId, answer, queries: queryMeta.map(({ purpose, rowCount }) => ({ purpose, rowCount })),
+      assumptions: plan.assumptions, truncated: queryResults.some(result => result.truncated) }
+  }
   if (!semConsulta && /\b(?:liste|lista|listar|ranqueie|ranking|ordene|ordenad[oa]s?|top)\b/i.test(message)
     && queryResults.some((result) => result.rows.length > 1)) {
     const answer = resumoLegivel(dataForAnswer)
@@ -418,6 +479,7 @@ Resposta clara, sem HTML, com o detalhamento necessário para responder à pergu
     reportMap: context.reportMap,
     ambiguities: context.ambiguities,
     measures: context.measures.map((measure) => ({ name: measure.name, description: measure.description })),
+    verifiedReportRules: input.manifest.raw.reportReferences,
   } : undefined
   let answer = ''
   let tokens = plannerTokens
@@ -433,12 +495,16 @@ Resposta clara, sem HTML, com o detalhamento necessário para responder à pergu
     try {
       answer = parseAnswer(response.texto ?? '')
       // Sem linhas não há o que ancorar: a resposta vem do contexto do relatório.
-      if (semConsulta || answerIsGrounded(answer, queryResults.map((result) => result.rows), message)) break
+      if (semConsulta ? !/R\$/.test(answer) && answerIsGrounded(answer, [[{ reference: JSON.stringify(reference) }]], message)
+        : answerIsGrounded(answer, queryResults.map((result) => result.rows), message)) break
       answer = ''
     } catch (error) { console.error('[bi-ai] invalid explanation:', error) }
   }
   if (!answer) {
-    answer = resumoLegivel(dataForAnswer.map(({ purpose, rows, truncated }) => ({ purpose, rows, truncated })))
+    answer = semConsulta ? ['Informações publicadas do relatório:', ...context.reportMap,
+      ...context.businessRules, ...context.measures.filter(measure => measure.description)
+        .map(measure => `${measure.name}: ${measure.description}`)].join('\n')
+      : resumoLegivel(dataForAnswer.map(({ purpose, rows, truncated }) => ({ purpose, rows, truncated })))
   }
   // Declara o escopo só em resposta numérica sem período explícito: é onde a
   // divergência com a tela filtrada causaria erro silencioso.

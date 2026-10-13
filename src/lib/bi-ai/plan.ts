@@ -39,7 +39,7 @@ function parseObject(text: string): Record<string, unknown> {
 }
 
 /** A data answer needs Power BI rows; only model/report explanations may omit DAX. */
-function metadataOnlyQuestion(question: string): boolean {
+export function metadataOnlyQuestion(question: string): boolean {
   const text = normalizeTerm(question)
   if (/\b20\d{2}\b|\b(?:quanto|valor|total|ranking|desvio|variacao|mensal|trimestral|comparacao|compare)\b/.test(text)) return false
   return /^(?:o que (?:e|significa|tem|mostra)|como (?:funciona|e calculad[oa])|qual (?:e |a |o )?(?:regra|definicao|formula|pagina|medida)|quais (?:sao )?(?:as |os )?(?:paginas|indicadores|filtros|medidas)|onde (?:fica|encontro|esta)|esse numero (?:considera|inclui|exclui))\b/.test(text)
@@ -207,7 +207,7 @@ export function answerIsGrounded(answer: string, results: Record<string, unknown
     else if (typeof value === 'string') allowed.push(...numbersIn(value).map((item) => item.value))
   }
   return numbersIn(answer).every(({ value, decimals, percent }) => {
-    const tolerance = 0.5 * 10 ** -decimals + 1e-8
+    const tolerance = (percent ? 0.5 * 10 ** -decimals : Math.min(0.005, 0.5 * 10 ** -decimals)) + 1e-8
     return allowed.some((item) => Math.abs(item - value) <= tolerance
       || (percent && Math.abs(item * 100 - value) <= tolerance))
   })

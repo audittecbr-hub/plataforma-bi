@@ -6,16 +6,17 @@ import { manifestHash, ManifestLinkError, parseLinkedManifest, parseManifest, ty
 import { publishedSchema } from './fabric-context'
 import { assertPublishedCatalog } from './fabric-schema'
 import { liveCatalog, liveManifestInput, synthesizeManifest } from './live-model'
+import { ReportEvidenceError, validateReportReferences } from './report-evidence'
 
 /**
  * O manifesto curado tem prioridade quando existe.
  * Sem manifesto, o modelo publicado é catalogado AO VIVO (INFO.VIEW.* + definição Fabric),
  * o que permite liberar qualquer projeto no portal sem preparar nada no Power BI.
  */
-export async function previewLiveManifest(dashboard: DashboardRow): Promise<BiManifest> {
+export async function previewLiveManifest(dashboard: DashboardRow, forceFresh = false): Promise<BiManifest> {
   const { workspaceId, semanticModelId } = liveManifestInput(dashboard)
   const [published, catalog] = await Promise.all([
-    publishedSchema(workspaceId, semanticModelId, dashboard.report_id ?? null),
+    publishedSchema(workspaceId, semanticModelId, dashboard.report_id ?? null, forceFresh),
     liveCatalog(workspaceId, semanticModelId),
   ])
   const manifest = parseManifest(synthesizeManifest({ dashboard, catalog, published }))
@@ -28,8 +29,18 @@ export async function manifestForDashboard(dashboard: DashboardRow): Promise<BiM
     throw new BiAiError(409, 'AI_DISABLED', 'A IA ainda não está habilitada para este relatório.')
   }
   try {
-    return parseLinkedManifest(dashboard)
+    const linked = parseLinkedManifest(dashboard)
+    if (linked.raw.source && (linked.raw.source as Record<string, unknown>).mode === 'live') {
+      const current = await previewLiveManifest(dashboard, Array.isArray(linked.raw.reportReferences) && linked.raw.reportReferences.length > 0)
+      current.raw.reportReferences = linked.raw.reportReferences
+      current.recommendedQuestions = linked.recommendedQuestions.length ? linked.recommendedQuestions : current.recommendedQuestions
+      const schema = await publishedSchema(current.workspaceId, current.semanticModelId, current.reportId)
+      validateReportReferences(current, schema)
+      return current
+    }
+    return linked
   } catch (error) {
+    if (error instanceof ReportEvidenceError) throw new BiAiError(409, 'REPORT_REFERENCE_INVALID', error.message)
     if (!(error instanceof ManifestLinkError)) throw error
     if (error.code !== 'MANIFEST_MISSING') {
       console.error('[bi-ai] manifest link:', dashboard.id, error.code)
@@ -46,6 +57,15 @@ export async function manifestForDashboard(dashboard: DashboardRow): Promise<BiM
 }
 
 export async function registerManifest(manifest: BiManifest, explicitDashboardId: string | null) {
+  if (manifest.raw.reportReferences !== undefined) {
+    try {
+      const schema = await publishedSchema(manifest.workspaceId, manifest.semanticModelId, manifest.reportId, true)
+      validateReportReferences(manifest, schema)
+    } catch (error) {
+      if (error instanceof ReportEvidenceError) throw new BiAiError(409, 'REPORT_REFERENCE_INVALID', error.message)
+      throw error
+    }
+  }
   const admin = createAdminClient()
   const id = explicitDashboardId ?? manifest.dashboardId
   if (id && manifest.dashboardId && id !== manifest.dashboardId) {

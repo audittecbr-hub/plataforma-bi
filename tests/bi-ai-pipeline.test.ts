@@ -71,11 +71,12 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
         dashboard: { id: '55555555-5555-4555-8555-555555555555', name: 'BI de teste', department: 'Diretoria',
           allowed_departments: [], assigned_user_id: null, sub_group: null },
         userId: '66666666-6666-4666-8666-666666666666', isAdmin: false, conversationId: null,
-        message: 'Qual a receita em 2026, com as três consultas de conferência?' }))
+        message: 'Consulte a receita na tabela Fato em 2026, com as três consultas de conferência.' }))
       if (failure) await assert.rejects(work(), error => error instanceof Error && 'status' in error && error.status === 502)
       else {
         const answer = await work()
-        assert.equal(answer.answer, 'Receita conferida no Power BI: 123.')
+        assert('answer' in answer)
+        assert.equal(answer.answer, 'Resultados do Power BI:\n\nConsulta 0:\nReceita0: 123\n\nConsulta 1:\nReceita1: 123\n\nConsulta 2:\nReceita2: 123')
         assert.deepEqual(answer.queries.map(query => query.purpose), ['Consulta 0', 'Consulta 1', 'Consulta 2'])
       }
       assert.equal(queries, 3)

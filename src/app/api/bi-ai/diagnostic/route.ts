@@ -2,6 +2,7 @@ import { apiError, authorizedDashboard, BiAiError } from '@/lib/bi-ai/access'
 import { executeDaxQuery, listWorkspaceDatasets, PowerBiQueryError, powerBiUserMessage } from '@/lib/powerbi'
 import { manifestForDashboard } from '@/lib/bi-ai/registry'
 import { publishedSchema } from '@/lib/bi-ai/fabric-context'
+import { validateReportReferences } from '@/lib/bi-ai/report-evidence'
 
 export const runtime = 'nodejs'
 
@@ -38,10 +39,13 @@ export async function GET(request: Request): Promise<Response> {
       if (rows.length !== 1) throw new BiAiError(502, 'POWERBI_ERROR', 'A consulta mínima não retornou a linha esperada.')
       try {
         const schema = await publishedSchema(manifest.workspaceId, manifest.semanticModelId, manifest.reportId)
+        const references = validateReportReferences(manifest, schema)
+        const indicators = references.reduce((count, reference) => count + reference.metrics.length, 0)
         return Response.json({ ok: true, code: 'FABRIC_READY',
-          detail: `Consulta DAX e definição publicada confirmadas: ${new Set(schema.columns.map((item) => item.table)).size} tabelas, ${schema.measures.length} medidas, ${schema.columns.length} colunas, ${schema.pages.length} páginas e ${schema.visualCount} visuais.`,
+          detail: `Consulta DAX e definição publicada confirmadas: ${new Set(schema.columns.map((item) => item.table)).size} tabelas, ${schema.measures.length} medidas, ${schema.columns.length} colunas, ${schema.pages.length} páginas e ${schema.visualCount} visuais. ${indicators} indicadores possuem referência de conferência com o relatório.`,
           schema: { modelHash: schema.modelHash, measures: schema.measures.length,
-            columns: schema.columns.length, pages: schema.pages.length, visuals: schema.visualCount } })
+            columns: schema.columns.length, pages: schema.pages.length, visuals: schema.visualCount,
+            verifiedIndicators: indicators, numericPolicy: 'published-report-evidence' } })
       } catch (error) {
         console.error('[bi-ai] diagnostic Fabric schema:', error instanceof Error ? error.message : error)
         return Response.json({ ok: manifest.capabilities.liveDefinitionRequired !== true,

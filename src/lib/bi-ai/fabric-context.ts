@@ -1,4 +1,5 @@
 import { getFabricAccessToken } from '@/lib/powerbi'
+import { memoAiRequest } from '@/lib/ai-request-cache'
 import { UUID } from './manifest'
 import { parsePublishedSchema, type FabricPart, type PublishedSchema } from './fabric-schema'
 
@@ -77,13 +78,19 @@ async function load(workspaceId: string, semanticModelId: string, reportId: stri
 }
 
 /** Live, read-only Fabric metadata, cached per server instance for 10 minutes. */
-export function publishedSchema(workspaceId: string, semanticModelId: string, reportId: string | null): Promise<PublishedSchema> {
+export function publishedSchema(workspaceId: string, semanticModelId: string, reportId: string | null, forceFresh = false): Promise<PublishedSchema> {
   if (!UUID.test(workspaceId) || !UUID.test(semanticModelId) || (reportId && !UUID.test(reportId))) {
     throw new FabricDefinitionError(null, 'Identidade Fabric inválida.')
   }
   const key = `${workspaceId}:${semanticModelId}:${reportId ?? ''}`
+  if (forceFresh) return memoAiRequest(`fabric-fresh:${key}`, () => readPublishedSchema(key, workspaceId, semanticModelId, reportId, true))
+  return readPublishedSchema(key, workspaceId, semanticModelId, reportId, false)
+}
+
+function readPublishedSchema(key: string, workspaceId: string, semanticModelId: string, reportId: string | null,
+  forceFresh: boolean): Promise<PublishedSchema> {
   const cached = cache.get(key)
-  if (cached && cached.expiresAt > Date.now()) return cached.promise
+  if (!forceFresh && cached && cached.expiresAt > Date.now()) return cached.promise
   const promise = load(workspaceId, semanticModelId, reportId)
   cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise })
   promise.catch(() => { if (cache.get(key)?.promise === promise) cache.delete(key) })

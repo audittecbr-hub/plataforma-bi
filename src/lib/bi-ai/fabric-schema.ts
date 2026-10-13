@@ -13,6 +13,7 @@ export interface PublishedPageMap {
 
 export interface PublishedSchema {
   modelHash: string
+  reportHash?: string
   /** Descrição do modelo escrita no TMDL. Em modelos bem documentados carrega as regras de arquitetura. */
   modelDescription: string
   measures: PublishedMeasure[]
@@ -142,6 +143,10 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
   const pageNames = new Map<string, string>()
   const visuals: PublishedSchema['visuals'] = []
   const hash = createHash('sha256')
+  const reportHash = createHash('sha256')
+  for (const part of [...reportParts].sort((a, b) => a.path.localeCompare(b.path))) {
+    reportHash.update(part.path).update(part.payloadType).update(part.payload)
+  }
   let visualCount = 0
   let modelDescription = ''
   for (const part of modelParts) {
@@ -215,7 +220,7 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
     }))
     .filter((page) => page.visuals.length || page.slicers.length)
   if (!measures.length || !modelColumns.length) throw new PublishedSchemaError('O Fabric não devolveu medidas e colunas do modelo.')
-  return { modelHash: hash.digest('hex'), modelDescription, measures, columns: modelColumns,
+  return { modelHash: hash.digest('hex'), reportHash: reportHash.digest('hex'), modelDescription, measures, columns: modelColumns,
     relationships: relationships.slice(0, 50), pages: pages.slice(0, 100), reportMap, visualCount, visuals }
 }
 
