@@ -1,6 +1,6 @@
 import type { BiManifest } from './manifest'
 import type { SelectedContext } from './context'
-import { maskDax, resolveSourceVariables } from './dax-source'
+import { maskDax, resolveSourceVariables, reconcileVariableSource } from './dax-source'
 import { validateDax } from './dax-guard'
 
 /** Accept arbitrary read expressions; the server bounds their output without changing filters or ordering. */
@@ -33,7 +33,14 @@ export function boundedReadQuery(dax: string, maxRows: number): string {
 export function prepareSemanticQuery(input: { dax: string; sourceMeasure?: string; maxRows: number; context: SelectedContext; manifest: BiManifest }) {
   const dax = boundedReadQuery(input.dax, input.maxRows)
   const requestedSource = input.sourceMeasure?.replace(/^.*\[|\]$/g, '').replace(/^'|'$/g, '').trim()
-  const source = requestedSource && input.context.semanticSources?.find(source => source.measure.toLowerCase() === requestedSource.toLowerCase())
+  let source = requestedSource && input.context.semanticSources?.find(source => source.measure.toLowerCase() === requestedSource.toLowerCase())
+  if (source) {
+    const code = maskDax(dax), local = new Set([...code.matchAll(/\bVAR\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gi)].map(match => match[1].toLowerCase()))
+    const possible = new Set((input.context.semanticSources ?? []).flatMap(source => source.variables.map(variable => variable.name.toLowerCase())))
+    const names = [...code.matchAll(/\b[A-Za-z_][A-Za-z0-9_]*\b/g)].map(match => match[0])
+      .filter(name => possible.has(name.toLowerCase()) && !local.has(name.toLowerCase()))
+    source = reconcileVariableSource(input.context.semanticSources ?? [], source, names)
+  }
   const variables = source ? resolveSourceVariables(source, dax) : []
   if (variables.some(variable => !variable.expression)) throw new Error('Inspecione esta medida: faltam expressões de suas regras publicadas.')
   const tables = input.manifest.tables.filter(table => table.queryable)

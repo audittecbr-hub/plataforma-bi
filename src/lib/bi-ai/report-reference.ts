@@ -167,12 +167,13 @@ export async function answerFromReportReference(input: {
   // The model selects facts/relationships; numbers and comparison statements are rendered and checked by the server.
   const eligible = facts.flatMap(left => facts.filter(right => left.id < right.id && canCompareReportFacts(left, right))
     .map(right => ({ left: left.id, right: right.id })))
-  const response = await conversar(input.config, [
+  const response = eligible.length ? await conversar(input.config, [
       { role: 'system', content: 'Analise a pergunta e as evidências consultadas no BI. Retorne SOMENTE JSON {"comparisons":[{"left":"f0","right":"f1"}]}. Selecione comparações úteis dentre eligibleComparisons. Os indicadores solicitados já serão mostrados: não copie a lista de fatos ou seus identificadores. Se não houver pares elegíveis, retorne imediatamente {"comparisons":[]}. Não invente números, causas ou texto livre; a relação maior/menor será conferida com os valores consultados.' },
       { role: 'user', content: JSON.stringify({ question: input.question,
         evidence: facts.map(({ id, label, value, format }) => ({ id, label, value, format })), eligibleComparisons: eligible,
         scope, rules: [...new Set(matched.flatMap(({ contract }) => contract.notes))] }) },
     ], { temperatura: 0, maxTokens: 'maximum', reasoningEffort: input.config.reasoningEffort, jsonObrigatorio: true, signal: input.signal })
+    : { texto: '{"comparisons":[]}', tokens: 0 }
   let chosen: string[] = [], comparisons: { left: string; right: string }[] = []
   try {
       const raw = JSON.parse((response.texto ?? '').replace(/^```(?:json)?\s*|\s*```$/g, ''))

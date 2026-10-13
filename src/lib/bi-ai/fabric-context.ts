@@ -1,5 +1,5 @@
 import { getFabricAccessToken } from '@/lib/powerbi'
-import { memoAiRequest } from '@/lib/ai-request-cache'
+import { invalidateAiRequest, memoAiRequest } from '@/lib/ai-request-cache'
 import { UUID } from './manifest'
 import { parsePublishedSchema, type FabricPart, type PublishedSchema } from './fabric-schema'
 
@@ -8,6 +8,7 @@ class FabricDefinitionError extends Error {
 }
 
 const cache = new Map<string, { expiresAt: number; promise: Promise<PublishedSchema> }>()
+const inFlight = new Map<string, Promise<PublishedSchema>>()
 const CACHE_MS = 10 * 60_000
 
 function operationUrl(value: string | null): string {
@@ -89,10 +90,20 @@ export function publishedSchema(workspaceId: string, semanticModelId: string, re
 
 function readPublishedSchema(key: string, workspaceId: string, semanticModelId: string, reportId: string | null,
   forceFresh: boolean): Promise<PublishedSchema> {
+  const pending = inFlight.get(key)
+  if (pending) return pending
   const cached = cache.get(key)
   if (!forceFresh && cached && cached.expiresAt > Date.now()) return cached.promise
   const promise = load(workspaceId, semanticModelId, reportId)
+  inFlight.set(key, promise)
   cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise })
   promise.catch(() => { if (cache.get(key)?.promise === promise) cache.delete(key) })
+  void promise.finally(() => { if (inFlight.get(key) === promise) inFlight.delete(key) }).catch(() => {})
   return promise
+}
+
+/** A final check must not reuse the initial request's memoized definition. */
+export function recheckPublishedSchema(workspaceId: string, semanticModelId: string, reportId: string | null) {
+  invalidateAiRequest(`fabric-fresh:${workspaceId}:${semanticModelId}:${reportId ?? ''}`)
+  return publishedSchema(workspaceId, semanticModelId, reportId, true)
 }

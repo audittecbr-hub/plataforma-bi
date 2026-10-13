@@ -37,7 +37,7 @@ function doAmbiente(): ConfigIa {
     const p = obterProvedor(provedorId)
     const modelo = process.env.BI_AI_MODEL?.trim() || process.env.LLM_MODELO?.trim() || p.modeloPadrao
     return { provedorId: p.id, modelo, fonte: process.env.BI_AI_PROVIDER || process.env.LLM_PROVEDOR ? 'ambiente' : 'padrao',
-        enabled: process.env.BI_AI_ENABLED === 'true', reasoningEffort: deepSeekThinkingModel(p.id, modelo) ? 'max' : 'auto' }
+        enabled: process.env.BI_AI_ENABLED === 'true', reasoningEffort: deepSeekThinkingModel(p.id, modelo) ? 'high' : 'auto' }
 }
 
 /** O que o chat vai usar agora. Nunca lanca: configuração quebrada nao derruba o chat. */

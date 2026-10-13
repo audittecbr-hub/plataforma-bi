@@ -22,6 +22,7 @@ import 'server-only'
 import { modelEnabled, readProviderKey, readProviderSettings } from '@/lib/ai-keyring'
 import { deepSeekThinkingModel, modelProtocol, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
 import { maximumOutputTokens } from '@/lib/ai-output'
+import { readLlmCompletionStream, type LlmActivity } from '@/lib/llm-stream'
 
 export type FormatoApi = 'openai-completions' | 'anthropic-messages'
 
@@ -186,6 +187,8 @@ export interface OpcoesConversa {
     sessao?: string
     signal?: AbortSignal
     reasoningEffort?: ReasoningEffort
+    /** Provider activity only; no reasoning text is exposed to the caller/UI. */
+    onActivity?: (activity: LlmActivity) => void
 }
 
 type OpcoesResolvidas = Omit<OpcoesConversa, 'maxTokens'> & { maxTokens?: number }
@@ -276,6 +279,10 @@ async function conversarOpenAI(
     }
 
     const corpo: Record<string, unknown> = { model: modelo, messages: mensagens }
+    if (opcoes.onActivity && deepSeekThinkingModel(p.id, modelo)) {
+        corpo.stream = true
+        corpo.stream_options = { include_usage: true }
+    }
     if (opcoes.ferramentas?.length) {
         corpo.tools = opcoes.ferramentas
         corpo.tool_choice = 'auto'
@@ -317,6 +324,12 @@ async function conversarOpenAI(
         throw new ErroProvedor(r.status, p.id, detalhe)
     }
 
+    if (r.headers.get('content-type')?.includes('text/event-stream')) {
+        const streamed = await readLlmCompletionStream(r, opcoes.onActivity ?? (() => {}), opcoes.signal)
+        return { texto: streamed.message.content, raciocinio: streamed.message.reasoning_content,
+            motivoTermino: streamed.finish, chamadas: streamed.calls, mensagem: streamed.message,
+            tokens: streamed.tokens, ms: Date.now() - t0, provedor: p.id, modelo }
+    }
     const j = await r.json()
     const escolha = j?.choices?.[0] ?? {}
     const msg = escolha.message ?? {}

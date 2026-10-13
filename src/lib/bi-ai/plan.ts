@@ -4,6 +4,8 @@ import { prepareSemanticQuery } from './semantic-query'
 import type { ClarificationPrompt } from './clarification'
 import { normalizeTerm } from './context'
 import type { ReportScope } from './report-evidence'
+import { reconcileVariableSource } from './dax-source'
+import { compileSourceAnalysis } from './source-analysis'
 
 export interface PlannedQuery {
   purpose: string
@@ -56,6 +58,41 @@ export function metadataOnlyQuestion(question: string): boolean {
 
 export function parsePlan(text: string, context: SelectedContext, manifest: BiManifest, question: string): QueryPlan {
   const raw = parseObject(text)
+  if (raw.action === 'source-analysis') {
+    const query = compileSourceAnalysis(raw, context.semanticSources ?? [])
+    prepareSemanticQuery({ ...query, context, manifest })
+    return { answerable: true, intent: 'Cruzamento com fórmulas publicadas', reason: '', objectsUsed: [], queries: [query],
+      assumptions: Array.isArray(raw.assumptions) ? raw.assumptions.map(note => safeText(note, 4000)).filter(Boolean).slice(0, 30) : [] }
+  }
+  if (raw.action === 'focus-source') {
+    if (!Array.isArray(raw.measures) || !raw.measures.length || raw.measures.length > 6
+      || raw.measures.some(name => typeof name !== 'string' || !context.semanticSources?.some(source => source.measure === name))) {
+      throw new Error('Selecione os nomes exatos das fontes publicadas necessárias.')
+    }
+    return { answerable: false, intent: 'Selecionar fontes do modelo publicado', reason: '', objectsUsed: [], queries: [], assumptions: [],
+      inspect: [...new Set(raw.measures.map(name => `${name}::catalog`))] }
+  }
+  if (raw.action === 'inspect-source') {
+    const sourceName = typeof raw.measure === 'string' ? raw.measure.replace(/^\[|\]$/g, '').trim().toLowerCase() : ''
+    let source = context.semanticSources?.find(source => source.measure.toLowerCase() === sourceName)
+    if (!source) throw new Error('Fonte publicada inexistente. Use o nome exato do catálogo.')
+    if (raw.variables === undefined) return { answerable: false, intent: 'Inspecionar catálogo de regras', reason: '', objectsUsed: [],
+      queries: [], assumptions: [], inspect: [`${source.measure}::catalog`] }
+    if (!Array.isArray(raw.variables) || !raw.variables.length || raw.variables.length > 100) {
+      throw new Error('Informe os nomes exatos das variáveis da fonte publicada.')
+    }
+    const names = raw.variables.map(value => typeof value === 'string' ? value : safeText(asRecord(value).name, 200))
+    const originalSource = source.measure
+    source = reconcileVariableSource(context.semanticSources ?? [], source, names)
+    const variables = names.map(name => source.variables.find(variable => variable.name.toLowerCase() === name.trim().toLowerCase()))
+    const found = variables.filter((variable): variable is NonNullable<typeof variable> => !!variable)
+    if (!found.length) throw new Error(`Informe os nomes exatos das variáveis: ${source.variables.map(variable => variable.name).join(', ').slice(0, 1500)}`)
+    const missing = names.filter((_, index) => !variables[index])
+    return { answerable: false, intent: 'Inspecionar regras publicadas',
+      reason: [source.measure !== originalSource ? `Estas variáveis pertencem à fonte ${source.measure}; use este sourceMeasure.` : '',
+        missing.length ? `Variáveis ausentes na fonte: ${missing.join(', ')}. Use as definições e campos disponíveis.` : ''].filter(Boolean).join(' '),
+      objectsUsed: [], queries: [], assumptions: [], inspect: [...new Set(found.map(variable => `${source.measure}::${variable.name}`))] }
+  }
   if (raw.action === 'model-info') return { answerable: true, intent: 'Definições do modelo publicado', reason: '', objectsUsed: [],
     queries: [], assumptions: [], modelInfo: true }
   if (raw.action === 'search-catalog') {

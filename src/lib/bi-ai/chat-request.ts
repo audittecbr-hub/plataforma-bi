@@ -12,7 +12,8 @@ export async function requestBiAnalysis(input: { dashboardId: string; conversati
     if (!response.ok) { const body = await response.json(); throw new Error(body.error ?? 'Não consegui responder agora.') }
     const body = response.headers.get('content-type')?.includes('text/event-stream')
       ? await readBiChatStream(response, event => {
-        progress = progress && progress.step > event.step ? { ...progress, detail: event.detail } : event
+        const completedQueries = Math.max(progress?.completedQueries ?? 0, event.completedQueries ?? 0)
+        progress = progress && progress.step > event.step ? { ...progress, detail: event.detail, completedQueries } : { ...event, completedQueries }
         input.onProgress(progress)
       }) : await response.json() as BiChatResult
     input.signal.throwIfAborted()

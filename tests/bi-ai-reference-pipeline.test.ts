@@ -89,7 +89,8 @@ test('published evidence ignores invented output; new filters and changed report
     const unknown = await work('Qual receita realizada em 2026 para o cliente ACME?')
     assert('answer' in unknown && unknown.answer?.includes('123,45'))
     assert.equal(reads, 3)
-    assert.equal(calls, 3)
+    // Exact single KPI facts do not need model selection/comparison; only the new custom filter does.
+    assert.equal(calls, 1)
     refreshDuringQuery = true
     await assert.rejects(work(), /atualização do modelo mudou/)
     refreshDuringQuery = false
