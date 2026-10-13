@@ -238,7 +238,7 @@ export function IaTab({ initial }: { initial: Snapshot }) {
 
     <Panel>
       <PanelHeader icon={ShieldCheck} eyebrow="Por relatório" title="Chat IA nos dashboards"
-        description="Ative relatórios vinculados ao Power BI. Sem manifesto, o catálogo é lido ao vivo do modelo e do Fabric." />
+        description="Ative o acesso ao modelo completo. Os indicadores são conferidos com o relatório; perguntas sem indicador ou filtros definidos pedem esclarecimento." />
       <div className="space-y-3 border-t px-5 py-5 md:px-6">
         <Input type="search" value={dashboardSearch} onChange={(event) => setDashboardSearch(event.target.value)} placeholder="Buscar dashboard…" aria-label="Buscar dashboard" className="max-w-sm" />
         <div className="max-h-[32rem] divide-y overflow-y-auto rounded-[8px] border">

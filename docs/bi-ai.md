@@ -263,6 +263,75 @@ catálogo `INFO.VIEW.*` e a definição publicada no Fabric, verifica os objetos
 e passa a usá-los nas consultas. Quando houver um manifesto curado, ele fornece
 descrições, exemplos e regras certificadas adicionais.
 
+## Conferência de indicadores com o relatório publicado
+
+A política de evidência se aplica a todos os dashboards, inclusive novas
+ativações. Acesso ao catálogo completo não garante que uma soma de coluna
+reproduza um cartão: o visual pode aplicar deduplicação, datas de entrada/saída,
+parâmetros, arredondamento e posições de estoque. Para perguntas numéricas de
+um relatório, o servidor exige uma referência verificável do visual. Na
+ausência dela, pede esclarecimento em vez de substituir o indicador por uma
+medida de nome parecido. Consultas explícitas de registros continuam disponíveis
+em todo o modelo, com campos e valores renderizados juntos pelo servidor.
+
+`reportReferences` é uma lista de contratos declarativos no manifesto, com
+`version: 1`, `modelHash`, `reportHash`, `measure`, `page`, `source`, `metrics`
+e `notes`. Os hashes vinculam a referência às definições exatas do modelo e
+do relatório, incluindo visuais e filtros. Mudanças na publicação invalidam
+a referência até nova conferência. O registro e a ativação verificam esses
+vínculos. Nenhum dado financeiro dos testes é incluído no repositório.
+
+Uma fonte `static-html` lê somente os marcadores numéricos do HTML devolvido
+pela medida efetivamente usada no visual. `timeField` e `groupField` identificam
+os filtros de período e operação. As expressões `html` e `html-text` selecionam
+cartões e marcadores previamente conferidos. Valores vazios permanecem sem
+base; não viram zero. A precisão da resposta segue a do cartão.
+
+Uma fonte `delimited-html` declara `elementId`, `fields`, `textFields`,
+`regionCodes`, `regionLabels` e, quando presente, `currentMonthVariable`.
+Somente dados são lidos: scripts do visual nunca são executados. Expressões
+`sum`, `add`, `subtract` e `ratio` representam regras auditadas. `at: last`
+preserva a posição de estoque no corte; `at: previous` usa o mês anterior ao
+início do período. Esse layout e as regras devem ser conferidos com o visual,
+e não inferidos apenas do nome de uma medida auxiliar.
+
+As respostas consultam os valores atuais do Power BI, identificam período e
+filtros e informam a página de origem. O DeepSeek seleciona evidências e pares
+de comparação; o servidor calcula diferenças, valida relações e escreve os
+números. Uma escolha incompleta do modelo preserva todos os indicadores pedidos.
+Não há cache de resultados financeiros entre perguntas. A leitura fresca da
+definição é compartilhada apenas dentro da mesma solicitação, evitando repetir
+exportações sem reutilizar a definição de uma pergunta anterior.
+
+São suportados meses explícitos, ano, trimestre, semestre, evolução mensal,
+comparação entre períodos, vários indicadores e ranking pelas regionais
+declaradas. Filtros ainda não auditados, datas diárias e ambiguidades pedem
+esclarecimento. O Publish to web não disponibiliza os slicers ativos para o
+Chat: o usuário precisa informar o mesmo recorte da tela. Uma atualização
+de dados que falhou mantém o snapshot publicado; isso deve ser registrado
+nas notas da referência e corrigido na fonte/atualização do Power BI.
+O histórico de atualização é conferido antes e depois da análise: uma
+atualização em andamento ou uma mudança durante a resposta interrompe a
+resposta e exige nova consulta. A evidência registra hora de consulta e status;
+falhas de atualização são informadas sem expor detalhes de conexão.
+
+Para outro projeto, catalogue o modelo, identifique medidas e filtros usados
+nos visuais, registre as referências, confronte os valores com a tela em
+vários períodos e filtros, e execute a bateria de perguntas com resultados
+esperados obtidos do BI. Só depois considere os indicadores conferidos.
+O diagnóstico administrativo informa a quantidade de indicadores referenciados.
+
+`tools/audit-bi-ai.mts` executa a bateria real com o provedor configurado, sem
+gravar conversas de teste para usuários. Recebe arquivo de casos e arquivo de
+saída: `node --conditions=react-server --env-file=.env.local --import tsx
+tools/audit-bi-ai.mts /caminho/privado/casos.json /caminho/privado/resultado.json`.
+Cada caso declara `id`, `dashboardId`, `question` e `expected`: `kind:
+clarification` ou `kind: evidence`, com `months`, `region` e `values`
+(`label`, `value`, `tolerance` opcional). Os valores esperados devem vir de
+conferência independente do BI. Nunca use a própria resposta como resultado
+esperado. `--allow-paused` permite testar com a IA global pausada, sem alterar
+o estado da produção. Perguntas, respostas e resultados ficam no arquivo privado.
+
 ## Registro opcional de manifesto curado
 
 O script do PBIP gera JSON até 1 MB e chama `POST /api/bi-ai/register` com o

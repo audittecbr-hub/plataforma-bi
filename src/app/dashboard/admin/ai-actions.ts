@@ -8,8 +8,7 @@ import { lerConfigIa, salvarConfigIa } from '@/lib/llm-config'
 import { encryptionConfigured, readProviderSettings, removeStoredProviderKey,
   setModelEnabled, setProviderEnabled, storeProviderKey } from '@/lib/ai-keyring'
 import { isReasoningEffort, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
-import { parseLinkedManifest } from '@/lib/bi-ai/manifest'
-import { previewLiveManifest } from '@/lib/bi-ai/registry'
+import { manifestForDashboard, previewLiveManifest } from '@/lib/bi-ai/registry'
 
 async function requireAdminId(): Promise<string> {
   const supabase = await createClient()
@@ -173,7 +172,7 @@ export async function toggleDashboardAi(dashboardId: string, enabled: boolean) {
   if (error || !dashboard) return { ok: false, error: 'Dashboard não encontrado.' }
   if (enabled) {
     try {
-      if (dashboard.ai_manifest) parseLinkedManifest({ ...dashboard, ai_enabled: true })
+      if (dashboard.ai_manifest) await manifestForDashboard({ ...dashboard, ai_enabled: true })
       else await previewLiveManifest({ ...dashboard, ai_enabled: true })
     } catch (error) {
       console.error('[ai admin] dashboard activation failed:', error instanceof Error ? error.message : error)

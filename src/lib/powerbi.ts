@@ -255,7 +255,8 @@ export async function triggerDatasetRefresh(
  */
 export async function getLatestRefreshStatus(
     workspaceId: string,
-    datasetId: string
+    datasetId: string,
+    signal?: AbortSignal
 ): Promise<RefreshHistoryItem | null> {
     const token = await getAccessToken()
 
@@ -263,6 +264,8 @@ export async function getLatestRefreshStatus(
         `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/datasets/${datasetId}/refreshes?$top=1`,
         {
             headers: { Authorization: `Bearer ${token}` },
+            cache: 'no-store',
+            signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
         }
     )
 
