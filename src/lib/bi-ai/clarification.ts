@@ -39,7 +39,7 @@ export function clarificationKey(): Buffer {
 
 /** An encrypted, short-lived continuation bound to the current user and BI. */
 export function issueClarificationToken(pending: PendingClarification, key: Buffer): string {
-  if (key.length !== 32 || pending.original.length > 1800 || pending.count < 1 || pending.count > 2
+  if (key.length !== 32 || pending.original.length > 16000 || pending.count < 1 || pending.count > 2
     || !Array.isArray(pending.required) || pending.required.some((item) => !['period', 'resultKind', 'metaKind'].includes(item))) {
     throw new ClarificationError('Esclarecimento inválido.')
   }
@@ -53,7 +53,7 @@ export function readClarificationToken(token: string, binding: {
   userId: string; dashboardId: string; conversationId: string
 }, key: Buffer, now = Date.now()): PendingClarification {
   const parts = token.split('.')
-  if (key.length !== 32 || token.length > 5000 || parts.length !== 4 || parts[0] !== 'v1') {
+  if (key.length !== 32 || token.length > 32000 || parts.length !== 4 || parts[0] !== 'v1') {
     throw new ClarificationError('Esclarecimento inválido. Refaça a pergunta.')
   }
   try {
@@ -63,7 +63,7 @@ export function readClarificationToken(token: string, binding: {
       decipher.final()]).toString('utf8')) as PendingClarification
     if (value.userId !== binding.userId || value.dashboardId !== binding.dashboardId
       || value.conversationId !== binding.conversationId || typeof value.original !== 'string'
-      || value.original.length < 1 || value.original.length > 1800 || !Number.isInteger(value.count)
+      || value.original.length < 1 || value.original.length > 16000 || !Number.isInteger(value.count)
       || value.count < 1 || value.count > 2 || !Number.isFinite(value.issuedAt)
       || !Array.isArray(value.required) || value.required.some((item) => !['period', 'resultKind', 'metaKind'].includes(item))
       || value.issuedAt > now + 60_000 || now - value.issuedAt > 30 * 60_000) {

@@ -1,5 +1,6 @@
 import type { BiManifest, BiObject } from './manifest'
 import type { SelectedContext } from './context'
+import { maskDax } from './dax-source'
 
 export class DaxGuardError extends Error {}
 
@@ -37,18 +38,20 @@ export function validateDax(
   context: SelectedContext,
   manifest: BiManifest,
   maxRows: number,
+  bindings?: { variables: string[]; aliases: string[] },
 ): { measures: string[]; columns: string[] } {
-  if (!dax || dax.length > 20000 || /;|\/\*|\*\/|\/\//.test(dax)) {
+  if (!dax || dax.length > 128000 || /;|\/\*|\*\/|\/\//.test(maskDax(dax))) {
     throw new DaxGuardError('DAX vazio, longo demais ou com sintaxe não permitida.')
   }
   const compact = dax.trim()
-  if (!/^EVALUATE\s+/i.test(compact) || /\bDEFINE\b|\bEVALUATE\b[\s\S]*\bEVALUATE\b/i.test(compact)) {
+  const code = maskDax(compact)
+  if (!/^EVALUATE\s+/i.test(code) || /\bDEFINE\b|\bEVALUATE\b[\s\S]*\bEVALUATE\b/i.test(code)) {
     throw new DaxGuardError('Use uma única consulta EVALUATE, sem DEFINE.')
   }
-  if (METADADOS.test(compact)) {
+  if (METADADOS.test(code)) {
     throw new DaxGuardError('Consulta de metadados do modelo não é permitida.')
   }
-  if (FONTE_EXTERNA.test(compact)) {
+  if (FONTE_EXTERNA.test(code)) {
     throw new DaxGuardError('Referência a fonte de dados externa não é permitida.')
   }
   const outer = /^EVALUATE\s+(ROW|TOPN)\s*\(/i.exec(compact)
@@ -70,7 +73,9 @@ export function validateDax(
   const usedMeasures = new Set<string>()
   const usedColumns = new Set<string>()
   const usedTables = new Set<string>()
-  const aliases = new Set<string>()
+  const aliases = new Set<string>(bindings?.aliases)
+  // Iterators, table constructors and temporary calculations can project additional columns.
+  for (const match of compact.matchAll(/"((?:[^"]|"")+?)"\s*,/g)) aliases.add(match[1].replaceAll('""', '"'))
   for (const match of compact.matchAll(/"((?:[^"]|"")+?)"\s*,\s*(?:(?:CALCULATE|DIVIDE|IF|SWITCH|SUMX|SUM|AVERAGE|MIN|MAX|FORMAT|ABS|ROUND)\s*\(|\[[^\]]+\]|(?:'[^']+'|[A-Za-z_]\w*)\s*\[[^\]]+\])/gi)) {
     aliases.add(match[1].replace(/""/g, ''))
   }
@@ -82,7 +87,8 @@ export function validateDax(
   rest = rest.replace(/(?:'((?:[^']|'')+)'|([A-Za-z_][A-Za-z0-9_]*))\s*\[([^\]]+)\]/g,
     (_full, quoted: string | undefined, plain: string | undefined, member: string, offset: number, text: string) => {
       // ORDER BY [projected alias] is an output reference, not a table named BY.
-      if (!quoted && plain?.toUpperCase() === 'BY' && /\bORDER\s+$/i.test(text.slice(0, offset)) && aliases.has(member)) return `[${member}]`
+      if (!quoted && plain?.toUpperCase() === 'BY' && /\bORDER\s+$/i.test(text.slice(0, offset))
+        && (aliases.has(member) || findByName(context.measures, member) || findByName(context.columns, member))) return `[${member}]`
       const tableName = (quoted ?? plain ?? '').replace(/''/g, "'")
       const table = manifest.tables.find((item) => item.name.toLowerCase() === tableName.toLowerCase())
       if (!table || !table.queryable || !context.tables.some((item) => item.name === table.name)) {
@@ -117,6 +123,8 @@ export function validateDax(
   rest = rest.replace(/\[([^\]]+)\]/g, (_full, name: string) => {
     const measure = findByName(context.measures, name)
     if (!measure && aliases.has(name)) return ' '
+    const column = findByName(context.columns, name)
+    if (!measure && column?.queryable && !column.presentationOnly && (!column.restricted || context.allowRestricted)) return ' '
     if (!measure || !measure.queryable || (measure.restricted && !context.allowRestricted) || measure.presentationOnly) {
       throw new DaxGuardError(`Medida fora do contexto autorizado: [${name}].`)
     }
@@ -124,14 +132,15 @@ export function validateDax(
     return ' '
   })
   if (/[\[\]']/.test(rest)) throw new DaxGuardError('Referência DAX não reconhecida.')
-  if (usedMeasures.size === 0 && usedColumns.size === 0 && usedTables.size === 0) {
+  const sourceUsed = bindings?.variables.some(name => new RegExp(`\\b${name}\\b`, 'i').test(maskDax(compact)))
+  if (usedMeasures.size === 0 && usedColumns.size === 0 && usedTables.size === 0 && !sourceUsed) {
     throw new DaxGuardError('A consulta precisa usar uma tabela, medida ou coluna do modelo autorizado.')
   }
   const direct = /\b(?:SUM|AVERAGE|MIN|MAX)\s*\(\s*(?:'((?:[^']|'')+)'|([A-Za-z_]\w*))\s*\[([^\]]+)\]/gi
   for (const match of compact.matchAll(direct)) {
     const table = manifest.tables.find((item) => item.name.toLowerCase() === (match[1] ?? match[2]).toLowerCase())
     const column = table && findByName(table.columns, match[3])
-    if (!manifest.policy.allowDirectColumnAggregation || !column?.aggregatable) {
+    if (manifest.capabilities.fullModelAccess !== true && (!manifest.policy.allowDirectColumnAggregation || !column?.aggregatable)) {
       throw new DaxGuardError('Agregação direta de coluna não autorizada; use a medida oficial.')
     }
   }

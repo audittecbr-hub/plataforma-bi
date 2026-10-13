@@ -4,7 +4,7 @@ import { createAdminClient } from '@/utils/supabase/admin'
 import { BiAiError, type DashboardRow } from './access'
 import { manifestHash, ManifestLinkError, parseLinkedManifest, parseManifest, type BiManifest } from './manifest'
 import { publishedSchema } from './fabric-context'
-import { assertPublishedCatalog } from './fabric-schema'
+import { assertPublishedCatalog, PublishedSchemaError } from './fabric-schema'
 import { liveCatalog, liveManifestInput, synthesizeManifest } from './live-model'
 import { ReportEvidenceError, validateReportReferences } from './report-evidence'
 
@@ -19,8 +19,14 @@ export async function previewLiveManifest(dashboard: DashboardRow, forceFresh = 
     publishedSchema(workspaceId, semanticModelId, dashboard.report_id ?? null, forceFresh),
     liveCatalog(workspaceId, semanticModelId),
   ])
-  const manifest = parseManifest(synthesizeManifest({ dashboard, catalog, published }))
-  assertPublishedCatalog(manifest, published, false)
+  let manifest = parseManifest(synthesizeManifest({ dashboard, catalog, published }))
+  try { assertPublishedCatalog(manifest, published, false) }
+  catch (error) {
+    if (!(error instanceof PublishedSchemaError)) throw error
+    const current = await liveCatalog(workspaceId, semanticModelId, undefined, true)
+    manifest = parseManifest(synthesizeManifest({ dashboard, catalog: current, published }))
+    assertPublishedCatalog(manifest, published, false)
+  }
   return manifest
 }
 
@@ -31,14 +37,15 @@ export async function manifestForDashboard(dashboard: DashboardRow): Promise<BiM
   try {
     const linked = parseLinkedManifest(dashboard)
     if (linked.raw.source && (linked.raw.source as Record<string, unknown>).mode === 'live') {
-      const current = await previewLiveManifest(dashboard, Array.isArray(linked.raw.reportReferences) && linked.raw.reportReferences.length > 0)
+      const current = await previewLiveManifest(dashboard, true)
       current.raw.reportReferences = linked.raw.reportReferences
       current.recommendedQuestions = linked.recommendedQuestions.length ? linked.recommendedQuestions : current.recommendedQuestions
-      const schema = await publishedSchema(current.workspaceId, current.semanticModelId, current.reportId)
-      validateReportReferences(current, schema)
       return current
     }
-    return linked
+    const current = await previewLiveManifest(dashboard, true)
+    current.raw.reportReferences = linked.raw.reportReferences
+    current.recommendedQuestions = linked.recommendedQuestions
+    return current
   } catch (error) {
     if (error instanceof ReportEvidenceError) throw new BiAiError(409, 'REPORT_REFERENCE_INVALID', error.message)
     if (!(error instanceof ManifestLinkError)) throw error

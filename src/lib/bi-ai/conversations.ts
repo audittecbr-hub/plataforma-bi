@@ -51,7 +51,7 @@ export async function previousTurns(conversationId: string): Promise<{ question:
     throw new BiAiError(503, 'MIGRATION_REQUIRED', 'Histórico indisponível. Aplique a migration.')
   }
   return (data ?? []).reverse().map((row) => ({
-    question: String(row.pergunta ?? '').slice(0, 500),
+    question: String(row.pergunta ?? '').slice(0, 8000),
     answer: String(row.resposta ?? '').slice(0, 1200),
   }))
 }

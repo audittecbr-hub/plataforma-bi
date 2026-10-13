@@ -16,6 +16,7 @@ export interface BiChatResult {
   ok: boolean
   conversationId: string
   answer?: string
+  continuationToken?: string
   clarification?: { question: string; options: string[]; token: string }
   queries?: { purpose: string; rowCount: number }[]
 }

@@ -7,7 +7,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Textarea } from '@/components/ui/textarea'
 import { BiAiResponse } from '@/components/bi-ai-response'
 import { BiAiProgress } from '@/components/bi-ai-progress'
-import { biProgress, readBiChatStream, type BiChatResult, type BiProgress } from '@/lib/bi-ai/progress'
+import { biProgress, type BiProgress } from '@/lib/bi-ai/progress'
+import { requestBiAnalysis } from '@/lib/bi-ai/chat-request'
 
 interface ChatContext {
   enabled: boolean
@@ -123,17 +124,8 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
     setProgress(biProgress(1, 'Conectando ao modelo atualizado deste relatório.'))
     setMessages((old) => [...old, { id, question }])
     try {
-      const response = await fetch('/api/bi-ai/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-        body: JSON.stringify({ dashboardId, conversationId, message: question,
-          ...(clarificationToken ? { clarificationToken } : {}) }),
-        signal: controller.signal,
-      })
-      if (!response.ok) { const body = await response.json(); throw new Error(body.error ?? 'Não consegui responder agora.') }
-      const body = response.headers.get('content-type')?.includes('text/event-stream')
-        ? await readBiChatStream(response, event => { if (activeRequest.current === controller) setProgress(event) })
-        : await response.json() as BiChatResult
+      const body = await requestBiAnalysis({ dashboardId, conversationId, message: question, clarificationToken, signal: controller.signal,
+        onProgress: event => { if (activeRequest.current === controller) setProgress(event) } })
       if (controller.signal.aborted || activeRequest.current !== controller) return
       setConversationId(body.conversationId)
       const clarification = body.clarification as ClarificationResponse | undefined
@@ -226,7 +218,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
           </div>
           <div className="border-t p-4">
             <div className="flex items-end gap-2">
-              <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} maxLength={500}
+              <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} maxLength={8000}
                 placeholder={pendingClarification ? 'Responda ao esclarecimento acima…' : 'Pergunte sobre este relatório…'}
                 disabled={!context?.enabled || pending}
                 onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(message) } }}
