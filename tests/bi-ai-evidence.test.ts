@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { parseManifest } from '../src/lib/bi-ai/manifest'
-import { factsFromReportHtml, formatReportFact, matchReportMetrics, reportScope, validateReportReferences,
+import { factsFromReportHtml, formatReportFact, matchReportMetrics, reportScope, validateReportReferences, prepareReportHtml, factsFromPreparedReport,
   type ReportReferenceContract } from '../src/lib/bi-ai/report-evidence'
-import { reportReferenceDax, renderReportComparisons } from '../src/lib/bi-ai/report-reference'
+import { reportReferenceDax, renderReportComparisons, batchReportReferenceDax } from '../src/lib/bi-ai/report-reference'
 import type { PublishedSchema } from '../src/lib/bi-ai/fabric-schema'
 
 const contract: ReportReferenceContract = { version: 1, modelHash: 'model-v1', reportHash: 'report-v1', measure: 'Visual', page: 'HOME',
@@ -108,4 +108,15 @@ test('model-selected comparisons are rendered only from compatible verified valu
   const output = renderReportComparisons([...facts, other], [{ left: facts[0].id, right: 'later' },
     { left: facts[0].id, right: facts[1].id }, { left: facts[0].id, right: 'invented' }, { left: facts[0].id, right: facts[2].id }])
   assert.deepEqual(output, ['Honorários encontrados é maior que Honorários encontrados (outro período).'])
+})
+
+test('shared visual queries are deduplicated while separate scopes keep their exact facts', () => {
+  const scopes = [{ months: ['2026-09'], region: 'north', products: null }, { months: ['2026-10'], region: 'north', products: null }]
+  const batch = batchReportReferenceDax(manifest, scopes.map(scope => ({ contract, scope, metricIds: ['found', 'stock'] })))
+  assert.equal(batch.aliases.length, 1)
+  assert.deepEqual(batch.indexes, [0, 0])
+  const prepared = prepareReportHtml(html, contract)
+  assert.deepEqual(scopes.map(scope => factsFromPreparedReport(prepared, scope, contract.metrics).slice(0, 2).map(fact => fact.value)), [[40, 500], [50, 600]])
+  const filtered = { ...contract, source: { ...contract.source, kind: 'static-html' as const, timeField: 'Calendario[Date]' } }
+  assert.equal(batchReportReferenceDax(manifest, scopes.map(scope => ({ contract: filtered, scope: { ...scope, region: null }, metricIds: ['found'] }))).aliases.length, 2)
 })

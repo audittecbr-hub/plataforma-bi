@@ -321,6 +321,35 @@ vários períodos e filtros, e execute a bateria de perguntas com resultados
 esperados obtidos do BI. Só depois considere os indicadores conferidos.
 O diagnóstico administrativo informa a quantidade de indicadores referenciados.
 
+## Consultas rápidas e acompanhamento da análise
+
+Expressões DAX idênticas são avaliadas uma vez por pergunta; a leitura do
+HTML/dados também é reutilizada somente dentro dessa pergunta. Indicadores
+independentes são consultados em blocos de até duas expressões, com três blocos
+simultâneos. Uma rejeição por memória ou tamanho divide o bloco; erros de
+permissão, consulta ou fonte não geram resultados parciais. A checagem de
+atualização continua antes/depois do conjunto completo. Nenhum resultado
+financeiro é reutilizado entre perguntas.
+
+A IA recebe os dados consultados e pares de comparação válidos, com o modelo
+e raciocínio máximo configurados. Ela não precisa copiar a lista de fatos que
+o servidor já preserva. Comparações de meta e realizado exigem a mesma medida
+de origem e o mesmo recorte; indicadores de naturezas diferentes não são
+tratados como a mesma série. Diferenças e percentuais permanecem vinculados
+aos valores efetivamente consultados. O catálogo do modelo continua sendo
+descoberto no Power BI; não há respostas financeiras previamente escritas.
+
+O Chat solicita `Accept: text/event-stream` e recebe eventos reais de progresso:
+entendimento/contexto, consulta/cruzamentos, análise/conferência. O resultado
+chega somente quando o pipeline termina. Heartbeats mantêm a conexão durante
+o raciocínio; cancelar a pergunta interrompe o trabalho. Clientes que pedem
+JSON continuam usando o contrato anterior. As etapas não são percentuais ou
+estimativas inventadas de conclusão.
+
+Respostas usam tópicos, títulos curtos, emojis e tabelas. Fonte, filtros e
+notas ficam em uma seção expansível; alertas de atualização permanecem
+visíveis. Markdown não executa HTML, imagens, scripts ou links externos.
+
 `tools/audit-bi-ai.mts` executa a bateria real com o provedor configurado, sem
 gravar conversas de teste para usuários. Recebe arquivo de casos e arquivo de
 saída: `node --conditions=react-server --env-file=.env.local --import tsx

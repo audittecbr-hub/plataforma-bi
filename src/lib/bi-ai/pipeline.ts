@@ -10,6 +10,8 @@ import { compactContextForPlanner, expandContextFromPlan, fullContextForPlanner,
 import { mapConcurrent } from './concurrency'
 import { answerFromReportReference } from './report-reference'
 import { ReportEvidenceError } from './report-evidence'
+import { biProgress, type BiProgressReporter } from './progress'
+import { escapeMarkdown } from './message-format'
 import { validateDax } from './dax-guard'
 import { certifiedPlan, certifiedScopeMessage, CertifiedQueryError } from './certified'
 import { publishedSchema } from './fabric-context'
@@ -47,13 +49,17 @@ function formatarValor(value: unknown): string {
  */
 function resumoLegivel(results: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }[]): string {
   const blocos = results.map((result) => {
-    if (!result.rows.length) return `${result.purpose}: sem dados neste recorte.`
-    const linhas = result.rows.slice(0, 50).map((row) => Object.entries(row)
-      .map(([key, value]) => `${key.includes('[') ? key.slice(key.indexOf('[') + 1).replace(/\]$/, '') : key}: ${formatarValor(value)}`).join(' · '))
-    if (result.truncated || result.rows.length > 50) linhas.push('(lista truncada; refine a pergunta para ver mais linhas)')
-    return `${result.purpose}:\n${linhas.join('\n')}`
+    const title = `### 🔎 ${escapeMarkdown(result.purpose)}`
+    if (!result.rows.length) return `${title}\n\n- Sem dados neste recorte.`
+    const label = (key: string) => escapeMarkdown(key.includes('[') ? key.slice(key.indexOf('[') + 1).replace(/\]$/, '') : key)
+    const value = (entry: unknown) => escapeMarkdown(formatarValor(entry)).replace(/\r?\n/g, ' · ')
+    const keys = [...new Set(result.rows.flatMap(row => Object.keys(row)))]
+    const content = result.rows.length === 1 ? Object.entries(result.rows[0]).map(([key, entry]) => `- **${label(key)}:** ${value(entry)}`).join('\n')
+      : [`| ${keys.map(label).join(' | ')} |`, `| ${keys.map(() => '---').join(' | ')} |`,
+        ...result.rows.map(row => `| ${keys.map(key => value(row[key])).join(' | ')} |`)].join('\n')
+    return `${title}\n\n${content}${result.truncated ? '\n\n> ⚠️ Há mais registros. Refine os filtros para consultar o restante; os valores acima são as linhas retornadas.' : ''}`
   })
-  return `Resultados do Power BI:\n\n${blocos.join('\n\n')}`
+  return `### 📊 Resultados do Power BI\n\n${blocos.join('\n\n')}`
 }
 
 /**
@@ -109,9 +115,11 @@ export async function answerBiQuestion(input: {
   clarificationToken?: string | null
   signal?: AbortSignal
   audit?: BiAuditServices
+  onProgress?: BiProgressReporter
 }) {
   const started = Date.now()
   const incomingMessage = input.message.trim()
+  input.onProgress?.(biProgress(1, 'Identificando indicadores, período e filtros no modelo atualizado.'))
   if (!incomingMessage || incomingMessage.length > MAX_MESSAGE) {
     throw new BiAiError(400, 'INVALID_MESSAGE', `A pergunta deve ter de 1 a ${MAX_MESSAGE} caracteres.`)
   }
@@ -203,6 +211,7 @@ export async function answerBiQuestion(input: {
     try {
       const reference = await answerFromReportReference({ manifest: input.manifest, schema: liveSchema,
         question: message, config, signal: input.signal,
+        onProgress: input.onProgress,
         onQuery: entry => recordQueryLog({ ...entry, userId: input.userId, dashboardId: input.dashboard.id,
           semanticModelId: input.manifest.semanticModelId }) })
       if (reference?.clarification) return ask(reference.clarification, message, clarificationCount + 1)
@@ -234,6 +243,7 @@ export async function answerBiQuestion(input: {
     throw error
   }
   if (certified) {
+    input.onProgress?.(biProgress(2, 'Consultando os dados solicitados no Power BI.'))
     const queryStarted = Date.now()
     let rows: Record<string, unknown>[]
     try {
@@ -252,6 +262,7 @@ export async function answerBiQuestion(input: {
     }
     const answer = rows.length ? certified.answer(rows)
       : 'O modelo semântico não retornou dados para este recorte.'
+    input.onProgress?.(biProgress(3, 'Conferindo valores e organizando o resultado.'))
     const queryMeta = [{ purpose: certified.subject, dax: certified.dax, rowCount: rows.length }]
     await saveTurn({ ...input, conversationId, message, answer, queries: queryMeta,
       provider: 'powerbi-certified', model: certified.id, tokens: 0, started })
@@ -404,6 +415,7 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
     return null
   }
   let blankGroupsExcluded = false
+  input.onProgress?.(biProgress(2, plan.queries.length ? 'Executando as buscas com os filtros informados.' : 'Lendo as definições publicadas dos indicadores.'))
   const completedQueries = await mapConcurrent(plan.queries, 3, async (query) => {
     const queryStarted = Date.now()
     const execution = prepareGroupedExecution(query.dax, query.maxRows)
@@ -435,6 +447,7 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
     }
   }, input.signal)
   queryResults.push(...completedQueries)
+  input.onProgress?.(biProgress(3, 'Analisando os resultados e conferindo a resposta com o modelo.'))
   if (blankGroupsExcluded) plan.assumptions.push('Grupos sem nome foram excluídos da lista.')
   const queryMeta = queryResults.map(({ query, rowCount }) => ({ purpose: query.purpose, dax: query.dax, rowCount }))
   // Plano sem consulta: pergunta sobre o próprio relatório, respondida do contexto.
@@ -472,7 +485,7 @@ O DAX deve começar com EVALUATE ROW ou EVALUATE TOPN(n,...), com n até policy.
   }
   const explainerSystem = `Explique em português os resultados do Power BI. Use apenas valores presentes nas linhas recebidas. Não invente números, não faça cálculo manual que deveria ser feito no modelo e não some linhas truncadas. Se os dados forem insuficientes, diga isso. Cite o período/filtros somente quando aparecerem na pergunta ou nas linhas. O relatório Publish to web não informa slicers ativos; considere somente filtros descritos pelo usuário.
 Quando a pergunta for sobre o PRÓPRIO RELATÓRIO e não houver linhas de resultado, responda com o campo reference: use reportMap para dizer o que cada página mostra e quais filtros ela tem, e as descrições das medidas para explicar indicadores, regras e cuidados. Nesse caso não há números para citar: descreva com palavras.
-Resposta clara, sem HTML, com o detalhamento necessário para responder à pergunta. Retorne SOMENTE JSON: {"answer": string}.`
+Organize com títulos curtos, tópicos, linhas em branco e emojis úteis (📊 resultados, 🔎 análise, ⚠️ cuidados). Comece com a resposta direta e evite repetir contexto ou escrever blocos longos. Use tabelas para comparar dados; mantenha todos os fatos necessários à pergunta. Sem HTML. Retorne SOMENTE JSON: {"answer": string}.`
   const reference = semConsulta ? {
     business: context.business,
     businessRules: context.businessRules,

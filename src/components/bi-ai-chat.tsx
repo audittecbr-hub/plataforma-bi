@@ -5,6 +5,9 @@ import { Bot, History, LoaderCircle, MessageSquareText, Plus, Send, Square, X } 
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
+import { BiAiResponse } from '@/components/bi-ai-response'
+import { BiAiProgress } from '@/components/bi-ai-progress'
+import { biProgress, readBiChatStream, type BiChatResult, type BiProgress } from '@/lib/bi-ai/progress'
 
 interface ChatContext {
   enabled: boolean
@@ -37,6 +40,8 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [showHistory, setShowHistory] = useState(false)
   const [pending, setPending] = useState(false)
+  const [progress, setProgress] = useState<BiProgress | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const activeRequest = useRef<AbortController | null>(null)
   const bottom = useRef<HTMLDivElement>(null)
 
@@ -49,6 +54,15 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
 
   useEffect(() => {
     const controller = new AbortController()
+    activeRequest.current?.abort()
+    activeRequest.current = null
+    setContext(null)
+    setContextError('')
+    setConversationId(null)
+    setMessages([])
+    setPendingClarification(null)
+    setPending(false)
+    setProgress(null)
     fetch(`/api/bi-ai/context?dashboardId=${encodeURIComponent(dashboardId)}`, { signal: controller.signal })
       .then(async (response) => {
         const body = await response.json()
@@ -61,10 +75,19 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
   }, [dashboardId, loadConversations])
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => {
+    if (!pending) return
+    const started = Date.now()
+    setElapsedSeconds(0)
+    const timer = setInterval(() => setElapsedSeconds(Math.floor((Date.now() - started) / 1000)), 1000)
+    return () => clearInterval(timer)
+  }, [pending])
 
   async function openConversation(id: string) {
     activeRequest.current?.abort()
+    activeRequest.current = null
     setPending(false)
+    setProgress(null)
     const response = await fetch(`/api/bi-ai/history?dashboardId=${encodeURIComponent(dashboardId)}&conversationId=${encodeURIComponent(id)}`)
     const body = await response.json()
     if (!response.ok) { setContextError(body.error ?? 'Não foi possível abrir a conversa.'); return }
@@ -78,7 +101,9 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
 
   function newConversation() {
     activeRequest.current?.abort()
+    activeRequest.current = null
     setPending(false)
+    setProgress(null)
     setConversationId(null)
     setPendingClarification(null)
     setMessages([])
@@ -95,17 +120,21 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
     const id = crypto.randomUUID()
     setMessage('')
     setPending(true)
+    setProgress(biProgress(1, 'Conectando ao modelo atualizado deste relatório.'))
     setMessages((old) => [...old, { id, question }])
     try {
       const response = await fetch('/api/bi-ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
         body: JSON.stringify({ dashboardId, conversationId, message: question,
           ...(clarificationToken ? { clarificationToken } : {}) }),
         signal: controller.signal,
       })
-      const body = await response.json()
-      if (!response.ok) throw new Error(body.error ?? 'Não consegui responder agora.')
+      if (!response.ok) { const body = await response.json(); throw new Error(body.error ?? 'Não consegui responder agora.') }
+      const body = response.headers.get('content-type')?.includes('text/event-stream')
+        ? await readBiChatStream(response, event => { if (activeRequest.current === controller) setProgress(event) })
+        : await response.json() as BiChatResult
+      if (controller.signal.aborted || activeRequest.current !== controller) return
       setConversationId(body.conversationId)
       const clarification = body.clarification as ClarificationResponse | undefined
       setPendingClarification(clarification ?? null)
@@ -121,8 +150,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
           ? { ...item, error: error instanceof Error ? error.message : 'Falha ao responder.' } : item))
       }
     } finally {
-      if (activeRequest.current === controller) activeRequest.current = null
-      setPending(false)
+      if (activeRequest.current === controller) { activeRequest.current = null; setPending(false); setProgress(null) }
     }
   }
 
@@ -176,10 +204,10 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
                   </div>
                 )}
                 {messages.map((item) => (
-                  <div key={item.id} className="space-y-2">
+                  <div key={item.id} className="space-y-4">
                     <div className="ml-auto max-w-[90%] rounded-[8px] bg-gold-wash px-3 py-2 text-sm text-foreground">{item.question}</div>
-                    {item.answer && <div className="rounded-[8px] border bg-surface px-3 py-2 text-sm leading-relaxed whitespace-pre-wrap text-foreground">
-                      {item.answer}
+                    {item.answer && <div className="rounded-xl border bg-surface px-4 py-4">
+                      <BiAiResponse answer={item.answer} />
                       {!!item.queries?.length && <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{item.queries.length} consulta(s) ao Power BI</p>}
                       {item.clarification && <div className="mt-3 flex flex-wrap gap-2" aria-label="Opções de esclarecimento">
                         {item.clarification.options.map((option) => <Button key={option} type="button"
@@ -189,7 +217,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
                       </div>}
                     </div>}
                     {item.error && <div className="rounded-[8px] border border-destructive/40 px-3 py-2 text-sm text-destructive">{item.error}</div>}
-                    {!item.answer && !item.error && pending && <p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> Consultando o modelo e conferindo a resposta…</p>}
+                    {!item.answer && !item.error && pending && progress && <BiAiProgress progress={progress} elapsedSeconds={elapsedSeconds} />}
                   </div>
                 ))}
                 <div ref={bottom} />

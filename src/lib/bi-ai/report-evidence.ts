@@ -25,7 +25,7 @@ export interface ReportReferenceContract {
 
 export interface ReportScope { months: string[]; region: string | null; products: string[] | null; }
 export interface ReportFact { id: string; metricId: string; label: string; value: number | null;
-  format: ReportMetricReference['format']; precision: number; scope: string; }
+  format: ReportMetricReference['format']; precision: number; scope: string; sourceMeasure?: string; }
 
 export class ReportEvidenceError extends Error {}
 const NAME = /^[A-Za-z0-9_ .-]{1,120}$/
@@ -182,14 +182,20 @@ function localized(value: string): number | null {
   return number
 }
 
-/** Read data embedded by Power BI. HTML and scripts are parsed as data, never executed. */
-export function factsFromReportHtml(html: string, contract: ReportReferenceContract, scope: ReportScope,
-  metrics: ReportMetricReference[]): ReportFact[] {
-  if (!scope.months.length || !scope.months.every(month => MONTH.test(month))) throw new ReportEvidenceError('Período inválido.')
+export interface PreparedReportHtml {
+  contract: ReportReferenceContract
+  nodes: Node[]
+  rows: Record<string, string | number>[]
+  current: string | null
+  plain: string
+}
+
+/** Parse once per query; the immutable data can serve several scopes in the same request. */
+export function prepareReportHtml(html: string, contract: ReportReferenceContract): PreparedReportHtml {
   const doc = root(html), nodes = walk(doc)
   const element = nodes.find(node => attr(node, 'id') === contract.source.elementId)
   const rows: Record<string, string | number>[] = []
-  let current = scope.months.at(-1)!
+  let current: string | null = null
   if (contract.source.kind === 'delimited-html') {
     if (!element) throw new ReportEvidenceError('Payload numérico ausente no visual.')
     if (contract.source.currentMonthVariable) {
@@ -197,7 +203,6 @@ export function factsFromReportHtml(html: string, contract: ReportReferenceContr
       const match = new RegExp(`window\\.${name}=['"](20\\d{2}-(?:0[1-9]|1[0-2]))['"]`).exec(html)
       if (!match) throw new ReportEvidenceError('Data de corte do visual ausente.')
       current = match[1]
-      if (scope.months.some(month => month.slice(0, 4) !== current.slice(0, 4))) throw new ReportEvidenceError('O visual não possui esse ano no seletor.')
     }
     for (const line of text(element).trim().split('~')) {
       if (!line) continue
@@ -217,6 +222,21 @@ export function factsFromReportHtml(html: string, contract: ReportReferenceContr
       rows.push(row)
     }
   }
+  return { contract, nodes, rows, current, plain: text(doc).replace(/\s+/g, ' ').trim() }
+}
+
+/** Read data embedded by Power BI. HTML and scripts are parsed as data, never executed. */
+export function factsFromReportHtml(html: string, contract: ReportReferenceContract, scope: ReportScope,
+  metrics: ReportMetricReference[]): ReportFact[] {
+  return factsFromPreparedReport(prepareReportHtml(html, contract), scope, metrics)
+}
+
+export function factsFromPreparedReport(prepared: PreparedReportHtml, scope: ReportScope,
+  metrics: ReportMetricReference[]): ReportFact[] {
+  if (!scope.months.length || !scope.months.every(month => MONTH.test(month))) throw new ReportEvidenceError('Período inválido.')
+  const { contract, nodes, rows, plain } = prepared
+  const current = prepared.current ?? scope.months.at(-1)!
+  if (prepared.current && scope.months.some(month => month.slice(0, 4) !== current.slice(0, 4))) throw new ReportEvidenceError('O visual não possui esse ano no seletor.')
   const selected = new Set(scope.months), last = scope.months.at(-1)! > current ? current : scope.months.at(-1)!
   const first = scope.months[0], [year, month] = first.split('-').map(Number)
   const previous = `${month === 1 ? year - 1 : year}-${String(month === 1 ? 12 : month - 1).padStart(2, '0')}`
@@ -247,7 +267,6 @@ export function factsFromReportHtml(html: string, contract: ReportReferenceContr
       return { value: localized(value), precision: value.includes('%') ? 0.05 : value.includes(',') ? 0.005 : 0.5 }
     }
     if (e.op === 'html-text') {
-      const plain = text(doc).replace(/\s+/g, ' ').trim()
       let index = -1
       for (let i = 0; i <= (e.occurrence ?? 0); i++) {
         index = plain.toLocaleUpperCase('pt-BR').indexOf(e.label.toLocaleUpperCase('pt-BR'), index + 1)
@@ -282,10 +301,14 @@ export function factsFromReportHtml(html: string, contract: ReportReferenceContr
   })
 }
 
-export function formatReportFact(fact: ReportFact): string {
+export function formatReportValue(fact: ReportFact): string {
   const decimals = Math.min(4, Math.max(0, Math.round(-Math.log10(fact.precision * 2))))
   const value = fact.value === null ? 'sem base para calcular' :
     new Intl.NumberFormat('pt-BR', fact.format === 'currency' ? { style: 'currency', currency: 'BRL', minimumFractionDigits: decimals, maximumFractionDigits: decimals }
       : { minimumFractionDigits: fact.format === 'percent' ? decimals : 0, maximumFractionDigits: decimals }).format(fact.value)
-  return `${fact.label}: ${value}${fact.value !== null && fact.format === 'percent' ? '%' : ''}`
+  return `${value}${fact.value !== null && fact.format === 'percent' ? '%' : ''}`
+}
+
+export function formatReportFact(fact: ReportFact): string {
+  return `${fact.label}: ${formatReportValue(fact)}`
 }

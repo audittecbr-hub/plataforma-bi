@@ -4,6 +4,8 @@ import { answerBiQuestion } from '@/lib/bi-ai/pipeline'
 import { manifestForDashboard } from '@/lib/bi-ai/registry'
 import { withAiRequestCache } from '@/lib/ai-request-cache'
 import { lerConfigIa } from '@/lib/llm-config'
+import { streamBiAnswer } from '@/lib/bi-ai/stream'
+import type { BiProgressReporter } from '@/lib/bi-ai/progress'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -25,13 +27,17 @@ async function answerRequest(request: Request): Promise<Response> {
       throw new BiAiError(400, 'INVALID_INPUT', 'Informe dashboardId, conversationId opcional e message.')
     }
     const { user, profile, dashboard } = await authorizedDashboard(body.dashboardId)
-    const [manifest] = await Promise.all([manifestForDashboard(dashboard), lerConfigIa()])
-    const answer = await answerBiQuestion({
+    const answer = async (onProgress?: BiProgressReporter, signal = request.signal) => {
+      const [manifest] = await Promise.all([manifestForDashboard(dashboard), lerConfigIa()])
+      return answerBiQuestion({
       dashboard, manifest, userId: user.id, isAdmin: profile?.is_admin === true,
-      conversationId: body.conversationId || null, message: body.message,
-      clarificationToken: body.clarificationToken || null,
-      signal: request.signal,
-    })
-    return Response.json({ ok: true, ...answer })
+      conversationId: typeof body.conversationId === 'string' ? body.conversationId : null, message: body.message as string,
+      clarificationToken: typeof body.clarificationToken === 'string' ? body.clarificationToken : null,
+      signal, onProgress,
+      })
+    }
+    if (request.headers.get('accept')?.includes('text/event-stream')) return streamBiAnswer(request,
+      (onProgress, signal) => withAiRequestCache(() => answer(onProgress, signal)))
+    return Response.json({ ok: true, ...await answer() })
   } catch (error) { return apiError(error) }
 }

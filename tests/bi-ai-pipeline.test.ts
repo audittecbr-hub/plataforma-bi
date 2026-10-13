@@ -76,7 +76,7 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
       else {
         const answer = await work()
         assert('answer' in answer)
-        assert.equal(answer.answer, 'Resultados do Power BI:\n\nConsulta 0:\nReceita0: 123\n\nConsulta 1:\nReceita1: 123\n\nConsulta 2:\nReceita2: 123')
+        assert.equal(answer.answer, '### 📊 Resultados do Power BI\n\n### 🔎 Consulta 0\n\n- **Receita0:** 123\n\n### 🔎 Consulta 1\n\n- **Receita1:** 123\n\n### 🔎 Consulta 2\n\n- **Receita2:** 123')
         assert.deepEqual(answer.queries.map(query => query.purpose), ['Consulta 0', 'Consulta 1', 'Consulta 2'])
       }
       assert.equal(queries, 3)

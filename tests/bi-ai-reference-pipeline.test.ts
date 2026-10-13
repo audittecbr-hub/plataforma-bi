@@ -14,10 +14,12 @@ test('published evidence ignores invented model output, reads fresh values, and 
   Object.assign(process.env, env)
   const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
   const part = (path: string, body: string): FabricPart => ({ path, payloadType: 'InlineBase64', payload: Buffer.from(body).toString('base64') })
-  const model = [part('definition/tables/Fato.tmdl', 'table Fato\n\tcolumn Valor\n\tmeasure Card = "<div>REALIZADO</div>"')]
+  const model = [part('definition/tables/Fato.tmdl', 'table Fato\n\tcolumn Valor\n\tmeasure Card = "<div>REALIZADO</div>"\n\tmeasure Card2 = "<div>REALIZADO</div>"')]
   const report = [part('definition/pages/home/page.json', JSON.stringify({ displayName: 'HOME' })),
     part('definition/pages/home/visuals/card/visual.json', JSON.stringify({ visual: { visualType: 'htmlContent', query: { queryState: {
       Values: { projections: [{ field: { Measure: { Expression: { SourceRef: { Entity: 'Fato' } }, Property: 'Card' } } }] },
+    } } } })), part('definition/pages/home/visuals/card2/visual.json', JSON.stringify({ visual: { visualType: 'htmlContent', query: { queryState: {
+      Values: { projections: [{ field: { Measure: { Expression: { SourceRef: { Entity: 'Fato' } }, Property: 'Card2' } } }] },
     } } } }))]
   const schema = parsePublishedSchema(model, report)
   const workspaceId = '11111111-1111-4111-8111-111111111111', semanticModelId = '22222222-2222-4222-8222-222222222222',
@@ -28,7 +30,7 @@ test('published evidence ignores invented model output, reads fresh values, and 
     reportReferences: [{ version: 1, modelHash: schema.modelHash, reportHash: schema.reportHash, measure: 'Card', page: 'HOME',
       source: { kind: 'static-html' }, notes: [], metrics: [{ id: 'revenue', label: 'Receita realizada', aliases: ['receita'], format: 'currency',
         expression: { op: 'html-text', label: 'REALIZADO', slot: 'currency' } }] }] })
-  let definitions = 0, reads = 0, calls = 0, changed = false, turns = 0, logs = 0, refreshVersion = 'v1', refreshDuringQuery = false
+  let definitions = 0, reads = 0, calls = 0, changed = false, turns = 0, logs = 0, refreshVersion = 'v1', refreshDuringQuery = false, memoryFailure = false
   try {
     globalThis.fetch = async (input, init) => {
       const url = String(input)
@@ -53,7 +55,14 @@ test('published evidence ignores invented model output, reads fresh values, and 
       if (url.endsWith('/executeQueries')) {
         reads++
         if (refreshDuringQuery) refreshVersion = 'v2'
-        return json({ results: [{ tables: [{ rows: [{ '[ReportReference]': `<div>REALIZADO R$ ${reads === 1 ? '123,45' : '321,00'}</div>` }] }] }] })
+        const query = JSON.parse(String(init?.body)).queries[0].query as string
+        if (memoryFailure && query.includes('"ReportReference1",') && query.includes('"ReportReference",')) {
+          memoryFailure = false
+          return new Response(JSON.stringify({ error: { code: 'Resource Governance', message: 'memory limit' } }), { status: 400 })
+        }
+        const aliases = [...query.matchAll(/"(ReportReference\d*)",/g)].map(match => match[1])
+        const row = Object.fromEntries(aliases.map(alias => [`[${alias}]`, `<div>REALIZADO R$ ${query.includes('[Card2]') ? '42,00' : reads === 1 ? '123,45' : '321,00'}</div>`]))
+        return json({ results: [{ tables: [{ rows: [row] }] }] })
       }
       throw new Error(`Unexpected request: ${url}`)
     }
@@ -83,6 +92,23 @@ test('published evidence ignores invented model output, reads fresh values, and 
     assert.equal(reads, 3)
     assert.equal(turns, 2)
     assert.equal(logs, 3)
+    changed = false
+    memoryFailure = true
+    const firstReference = (manifest.raw.reportReferences as Record<string, unknown>[])[0]
+    const multi = { ...manifest, raw: { ...manifest.raw, reportReferences: [firstReference, { ...firstReference, measure: 'Card2',
+      metrics: [{ id: 'expense', label: 'Despesa realizada', aliases: ['despesa'], format: 'currency', expression: { op: 'html-text', label: 'REALIZADO', slot: 'currency' } }] }] } }
+    const multiResult = await withAiRequestCache(() => answerBiQuestion({
+      manifest: multi, dashboard: { id: '44444444-4444-4444-8444-444444444444', name: 'BI de teste', department: 'Diretoria',
+        allowed_departments: [], assigned_user_id: null, sub_group: null }, userId: '55555555-5555-4555-8555-555555555555',
+      isAdmin: false, conversationId: null, message: 'Qual receita realizada e despesa realizada em outubro de 2026?',
+      audit: { configuration: { provedorId: 'opencode-go', modelo: 'deepseek-v4.1-flash', enabled: true, reasoningEffort: 'max', fonte: 'banco' },
+        takeRateLimit: async () => {}, resolveConversation: async () => '66666666-6666-4666-8666-666666666666', previousTurns: async () => [],
+        recordTurn: async () => {}, recordQueryLog: async () => {} },
+    }))
+    assert('evidence' in multiResult && multiResult.evidence)
+    assert.deepEqual(multiResult.evidence.values.map(fact => fact.value), [321, 42])
+    assert.equal(multiResult.queries.length, 2)
+    assert.equal(reads, 6)
   } finally {
     globalThis.fetch = originalFetch
     for (const name of Object.keys(env)) {
