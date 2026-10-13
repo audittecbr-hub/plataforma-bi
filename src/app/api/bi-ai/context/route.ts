@@ -2,17 +2,21 @@ import { apiError, authorizedDashboard, BiAiError } from '@/lib/bi-ai/access'
 import { providerReady } from '@/lib/bi-ai/pipeline'
 import { manifestForDashboard } from '@/lib/bi-ai/registry'
 import { lerConfigIa } from '@/lib/llm-config'
+import { withAiRequestCache } from '@/lib/ai-request-cache'
 
 export const runtime = 'nodejs'
 
 export async function GET(request: Request): Promise<Response> {
+  return withAiRequestCache(() => contextRequest(request))
+}
+
+async function contextRequest(request: Request): Promise<Response> {
   try {
     const dashboardId = new URL(request.url).searchParams.get('dashboardId') ?? ''
     const { dashboard } = await authorizedDashboard(dashboardId)
     try {
-      const manifest = await manifestForDashboard(dashboard)
-      const config = await lerConfigIa()
-      const ready = config.enabled && await providerReady()
+      const [manifest, config] = await Promise.all([manifestForDashboard(dashboard), lerConfigIa()])
+      const ready = config.enabled && await providerReady(config)
       return Response.json({
         enabled: ready,
         dashboardName: dashboard.name,

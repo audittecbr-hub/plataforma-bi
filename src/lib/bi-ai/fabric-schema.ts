@@ -237,7 +237,8 @@ export function assertPublishedCatalog(manifest: BiManifest, published: Publishe
 }
 
 /** Enrich the curated manifest context with the current published definitions. */
-export function withPublishedSchema(context: SelectedContext, manifest: BiManifest, published: PublishedSchema): SelectedContext {
+export function withPublishedSchema(context: SelectedContext, manifest: BiManifest, published: PublishedSchema,
+  maxContextChars = 34_000): SelectedContext {
   assertPublishedCatalog(manifest, published)
   const liveMeasures = new Map(published.measures.map((item) => [item.name.toLowerCase(), item]))
   const liveColumns = new Set(published.columns.map((item) => `${item.table}[${item.name}]`.toLowerCase()))
@@ -273,7 +274,7 @@ export function withPublishedSchema(context: SelectedContext, manifest: BiManife
       .map((visual) => `${visual.page}: ${visual.type} (${visual.fields.join(', ')})`),
     source: 'Definição atual do modelo e relatório publicados no Fabric',
   }
-  while (JSON.stringify(result).length > 34_000) {
+  while (JSON.stringify(result).length > maxContextChars) {
     const formula = result.measures.findLast((item) => item.publishedExpression)
     if (formula) { formula.publishedExpression = undefined; continue }
     if (result.availableDimensions.length) result.availableDimensions.pop()

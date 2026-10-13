@@ -19,6 +19,7 @@ import { createAdminClient } from '@/utils/supabase/admin'
 import { PROVEDORES, PROVEDOR_PADRAO, obterProvedor, type AlvoIa } from '@/lib/llm'
 import { modelEnabled } from '@/lib/ai-keyring'
 import { deepSeekThinkingModel, isReasoningEffort, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
+import { invalidateAiRequest, memoAiRequest } from '@/lib/ai-request-cache'
 
 const TABELA = 'gs_config_ia'
 const LINHA = 'global'
@@ -41,6 +42,10 @@ function doAmbiente(): ConfigIa {
 
 /** O que o chat vai usar agora. Nunca lanca: configuração quebrada nao derruba o chat. */
 export async function lerConfigIa(): Promise<ConfigIa> {
+    return memoAiRequest('config:global', loadConfigIa)
+}
+
+async function loadConfigIa(): Promise<ConfigIa> {
     const ambiente = doAmbiente()
     try {
         const { data, error } = await createAdminClient()
@@ -108,6 +113,7 @@ export async function salvarConfigIa(
                     : error.message,
             }
         }
+        invalidateAiRequest('config:global')
         return { ok: true }
     } catch (e) {
         return { ok: false, erro: e instanceof Error ? e.message : 'Falha ao gravar a configuração' }
