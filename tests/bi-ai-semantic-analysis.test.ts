@@ -15,7 +15,7 @@ VAR _initial = DATE(2026, 1, 1)
 VAR _records = SELECTCOLUMNS(FILTER('Events', 'Events'[Date] >= _initial), "Job", 'Events'[Job], "Value", ROUND('Events'[Amount], 2))
 VAR _prepared = ADDCOLUMNS(_records, "Nested", VAR _local = [Value] RETURN _local * 2)
 VAR _sum = SUMX(_prepared, [Value])
-VAR _layout = "<div>" & _sum & "</div>"
+VAR _layout = "<div data-tip-t='Participação' data-tip='Parte da entidade no total do período.'>" & _sum & "</div>"
 VAR _markup = _layout & "<script>window.test()</script>"
 RETURN _markup`
 const manifest = parseManifest({ schemaVersion: '2.0', identity: {
@@ -53,6 +53,7 @@ test('live visual rules expose pure DAX variables with exact dependencies, witho
   const variables = sourceVariables(expression)
   assert.deepEqual(variables.map(variable => variable.name), ['_initial', '_records', '_prepared', '_sum'])
   assert.deepEqual(variables[2].dependencies, ['_records'])
+  assert(context.semanticSources?.find(source => source.measure === 'Visual')?.description.includes('Parte da entidade no total do período'))
   assert(variables[2].expression.includes('VAR _local'))
   assert.equal(maskDax('"📊 VAR bad = x" VAR _ok = 1').length, '"📊 VAR bad = x" VAR _ok = 1'.length)
   const query = prepareSemanticQuery({ dax: 'EVALUATE ROW("Total", SUMX(_records, [Value]))', sourceMeasure: 'Visual', maxRows: 1, context, manifest })
@@ -68,6 +69,7 @@ test('read expressions retain filters and sorting, and all fields survive the an
   const plan = parsePlan(JSON.stringify({ answerable: true, queries: [{ dax: query, maxRows: 25 }] }), context, manifest, 'Qual maior job?')
   assert.equal(plan.queries.length, 1)
   assert.deepEqual(parsePlan(JSON.stringify({ action: 'search-catalog', terms: ['amount'] }), context, manifest, 'Qual valor?').catalogSearch, ['amount'])
+  assert.equal(parsePlan(JSON.stringify({ action: 'model-info' }), context, manifest, 'Descreva todas as tabelas e medidas disponíveis').modelInfo, true)
   assert.doesNotThrow(() => prepareSemanticQuery({ dax: 'EVALUATE TOPN(1, SUMMARIZECOLUMNS(Events[Job], "Value", [Total]), [Total], DESC) ORDER BY [Total] DESC',
     maxRows: 5, context, manifest }))
   assert.doesNotThrow(() => prepareSemanticQuery({ dax: 'EVALUATE SELECTCOLUMNS(SUMMARIZE(Events, Events[Job]), "Código", [Job]) ORDER BY [Código] ASC',

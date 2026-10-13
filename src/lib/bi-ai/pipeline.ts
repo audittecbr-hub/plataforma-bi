@@ -226,6 +226,12 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         'Não consegui confirmar a definição atual do modelo publicado no Fabric. Tente novamente em instantes.')
     }
   }
+  let currentReportRules: ReturnType<typeof validateReportReferences> = []
+  if (liveSchema) {
+    try { currentReportRules = validateReportReferences(input.manifest, liveSchema) }
+    catch (error) { if (!(error instanceof ReportEvidenceError)) throw error }
+  }
+  const currentManifest = { ...input.manifest, raw: { ...input.manifest.raw, reportReferences: currentReportRules } }
   if (checkpoint && (checkpoint.modelHash !== liveSchema?.modelHash || checkpoint.reportHash !== liveSchema?.reportHash)) {
     throw new BiAiError(409, 'MODEL_CHANGED', 'A definição do modelo ou relatório mudou durante a análise. Refaça a pergunta.')
   }
@@ -247,7 +253,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       && /\b(?:jobs?|clientes?)\b/.test(normalizedMessage)
   if (!checkpoint && liveSchema && !rawDataQuestion && !metadataOnlyQuestion(message)) {
     try {
-      const reference = await answerFromReportReference({ manifest: input.manifest, schema: liveSchema,
+      const reference = await answerFromReportReference({ manifest: currentManifest, schema: liveSchema,
         question: message, config, signal: input.signal,
         onProgress: input.onProgress,
         onQuery: entry => recordQueryLog({ ...entry, userId: input.userId, dashboardId: input.dashboard.id,
@@ -292,6 +298,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
 Retorne SOMENTE o próximo passo em JSON, sem escrever uma explicação extensa:
 1. Inspecionar uma tabela, medida ou fonte publicada: {"action":"inspect","inspect":["Nome exato"]}.
 Para procurar objetos que não estejam no trecho carregado: {"action":"search-catalog","terms":["palavra ou nome relacionado ao pedido"]}. A busca cobre todas as tabelas, colunas e medidas do projeto, inclusive objetos fora do contexto inicial. Você receberá os nomes e descrições para inspecionar ou consultar.
+Para explicar a estrutura, medidas, fórmulas, páginas e regras, sem afirmar valores dos registros: {"action":"model-info"}. Este caminho usa a definição publicada e contagens reais do catálogo; não depende de palavras específicas na pergunta. Valores e fatos dos registros precisam dos demais passos de consulta.
 2. Investigar valores, categorias, datas, chaves ou conferir hipóteses: {"action":"explore","queries":[{"purpose":"...","dax":"EVALUATE ...","maxRows":20}]}.
 3. Responder com consultas finais: {"answerable":true,"queries":[{"purpose":"Rótulo claro com período e filtros","dax":"EVALUATE ...","maxRows":100,"sourceMeasure":"opcional"}],"assumptions":[]}.
 4. Consultar os KPIs dos visuais diretamente: {"action":"report-facts","mode":"answer ou explore","requests":[{"measure":"medida em verifiedReportRules","metricIds":["id exato do indicador"],"scope":{"months":["2026-10"],"region":null}}]}. Este caminho reutiliza o valor exato publicado, inclusive metas, atingimentos e regras de estoque. Use somente quando o grão e filtros do KPI responderem ao pedido; detalhe por job/cliente precisa de DAX. Pode solicitar várias medidas e indicadores. No modo explore você recebe os valores e pode fazer análises adicionais. Prefira esta leitura para comparações de KPIs que já existam, sem tentar reconstruir medidas auxiliares.
@@ -338,7 +345,7 @@ Use qualquer expressão tabular DAX válida. Preserve o grão, deduplicação, a
   }
   const loadRequestedReportFacts = async (requests: NonNullable<QueryPlan['reportRequests']>) => {
     if (!liveSchema) throw new Error('A definição publicada está indisponível.')
-    const contracts = validateReportReferences(input.manifest, liveSchema)
+    const contracts = validateReportReferences(currentManifest, liveSchema)
     return mapConcurrent(requests, 3, async request => {
       const contract = contracts.find(contract => contract.measure === request.measure)
       if (!contract) throw new Error('Esta fonte não possui contrato de KPI. Use as regras DAX ou medidas do modelo.')
@@ -354,7 +361,7 @@ Use qualquer expressão tabular DAX válida. Preserve o grão, deduplicação, a
       ? 'A IA está analisando os dados investigados e preparando as próximas consultas.' : 'A IA está lendo as regras do modelo e planejando as consultas desta pergunta.'))
     const response = await conversar(config, [
       { role: 'system', content: plannerSystem },
-      { role: 'user', content: JSON.stringify({ dashboard: input.dashboard.name, context: plannerContext(), verifiedReportRules: input.manifest.raw.reportReferences }) },
+      { role: 'user', content: JSON.stringify({ dashboard: input.dashboard.name, context: plannerContext(), verifiedReportRules: currentReportRules }) },
       { role: 'user', content: JSON.stringify({
         question: message,
         history,
@@ -538,7 +545,7 @@ Use qualquer expressão tabular DAX válida. Preserve o grão, deduplicação, a
       const review = await conversar(config, [
         { role: 'system', content: `Revise o plano DAX antes de executar. A pergunta é o objetivo; as regras são a definição atual do modelo publicado. Confira se CADA consulta realmente responde ao pedido, respeita a situação/status, a data do evento, chaves, deduplicação, grão, filtros, arredondamentos por registro e sentido da ordenação. SUM(Valor) com ROUND só no final pode diferir de SUMX(tabela, ROUND(Valor, 2)) usado no visual. Não acrescente análises não solicitadas. Um pedido pelo maior/menor elemento pede o vencedor e empates, não uma lista grande. Purpose deve ser um título curto; coloque filtros em assumptions. Para indicadores do relatório, use exatamente a regra publicada; para um recorte explicitamente diferente pedido pelo usuário, preserve o recorte e informe a diferença. Prefira sourceMeasure com as variáveis publicadas; o servidor injeta as dependências completas. A medida HTML não é um número. Retorne somente JSON de plano final {"answerable":true,"queries":[{"purpose":"...","dax":"EVALUATE ...","maxRows":100,"sourceMeasure":"opcional"}],"assumptions":[]}. Campos da variável são [alias]. Se o plano já está correto, mantenha-o. Não peça esclarecimento sobre informação já disponível na pergunta ou nas regras.` },
         { role: 'user', content: JSON.stringify({ question: message, plan, context: compactContextForPlanner(context),
-          publishedRules: sources, visualIndicators: input.manifest.raw.reportReferences }) },
+          publishedRules: sources, visualIndicators: currentReportRules }) },
       ], { temperatura: 0, maxTokens: 'maximum', reasoningEffort: config.reasoningEffort, jsonObrigatorio: true, signal: input.signal })
       plannerTokens += review.tokens
       try {
@@ -638,13 +645,16 @@ Use qualquer expressão tabular DAX válida. Preserve o grão, deduplicação, a
 Quando a pergunta for sobre o PRÓPRIO RELATÓRIO e não houver linhas de resultado, responda com o campo reference: use reportMap para dizer o que cada página mostra e quais filtros ela tem, e as descrições das medidas para explicar indicadores, regras e cuidados. Nesse caso não há números para citar: descreva com palavras.
 Organize com títulos curtos, tópicos, linhas em branco e emojis úteis (📊 resultados, 🔎 análise, ⚠️ cuidados). Comece com a resposta direta e evite repetir contexto ou escrever blocos longos. Use tabelas para comparar dados; mantenha todos os fatos necessários à pergunta. Sem HTML. Retorne SOMENTE JSON: {"answer": string}.`
   const reference = semConsulta ? {
+    modelStructure: { tables: input.manifest.tables.length, columns: input.manifest.tables.reduce((count, table) => count + table.columns.length, 0),
+      measures: input.manifest.measures.length, tableNames: input.manifest.tables.map(table => table.name) },
     business: context.business,
     businessRules: context.businessRules,
     reportMap: context.reportMap,
     ambiguities: context.ambiguities,
     measures: context.measures.map((measure) => ({ name: measure.name, description: measure.description, expression: measure.publishedExpression })),
     semanticSources: plannerContext().semanticSources,
-    verifiedReportRules: input.manifest.raw.reportReferences,
+    catalogResults,
+    verifiedReportRules: currentReportRules,
   } : undefined
   let answer = ''
   let tokens = plannerTokens

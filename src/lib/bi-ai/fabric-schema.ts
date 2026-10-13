@@ -68,8 +68,12 @@ function measureBlocks(text: string, table: string): PublishedMeasure[] {
       ? joined : ''
     const variables = sourceVariables(definition)
     const comments = [...definition.matchAll(/\/\*([\s\S]*?)\*\//g)].slice(0, 12).map(match => safeMetadataText(match[1], 1800)).filter(Boolean)
+    // Business definitions also live in visual tooltips; read their text without executing markup or JavaScript.
+    const visualRules = [...definition.matchAll(/data-tip-t='([^']+)'\s+data-tip='([^']+)'/g)]
+      .map(match => safeMetadataText(`${match[1]}: ${match[2].replaceAll('\\n', ' ')}`, 1000)).filter(Boolean)
+    const description = [...comments, ...new Set(visualRules)].join('\n').slice(0, 14000)
     found.push({ name, table, expression: safe,
-      ...(variables.length ? { semanticSource: { measure: name, table, description: comments.join('\n'), variables } } : {}) })
+      ...(variables.length ? { semanticSource: { measure: name, table, description, variables } } : {}) })
   }
   return found
 }

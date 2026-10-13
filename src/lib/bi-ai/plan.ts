@@ -22,6 +22,7 @@ export interface QueryPlan {
   clarification?: ClarificationPrompt
   inspect?: string[]
   catalogSearch?: string[]
+  modelInfo?: boolean
   exploratory?: boolean
   reportRequests?: { measure: string; metricIds: string[]; scope: ReportScope }[]
   reportExploratory?: boolean
@@ -55,6 +56,8 @@ export function metadataOnlyQuestion(question: string): boolean {
 
 export function parsePlan(text: string, context: SelectedContext, manifest: BiManifest, question: string): QueryPlan {
   const raw = parseObject(text)
+  if (raw.action === 'model-info') return { answerable: true, intent: 'Definições do modelo publicado', reason: '', objectsUsed: [],
+    queries: [], assumptions: [], modelInfo: true }
   if (raw.action === 'search-catalog') {
     const terms = Array.isArray(raw.terms) ? raw.terms.map(term => safeText(term, 200)).filter(Boolean).slice(0, 12) : []
     if (!terms.length) throw new Error('Informe o que procurar no catálogo completo do modelo.')
