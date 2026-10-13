@@ -37,9 +37,21 @@ export function boundedReadQuery(dax: string, maxRows: number): string {
   return `EVALUATE TOPN(${maxRows}, (${text.slice(start, end).trim()})${topOrder})${order ? ` ORDER BY ${order}` : ''}`
 }
 
+/** DEFINE VAR is ordinary read syntax; canonicalize it without allowing measure/table/column overrides. */
+export function localizeReadVariables(dax: string): string {
+  const text = dax.trim(), code = maskDax(text)
+  if (!/^DEFINE\s+VAR\b/i.test(code)) return text
+  const evaluations = [...code.matchAll(/\bEVALUATE\b/gi)]
+  if (evaluations.length !== 1) return text
+  const at = evaluations[0].index!, declarations = text.slice(/^DEFINE\s+/i.exec(code)![0].length, at).trim()
+  if (/\b(?:DEFINE|MEASURE|TABLE|COLUMN|EVALUATE)\b/i.test(maskDax(declarations))) return text
+  const body = text.slice(at + evaluations[0][0].length).trim()
+  return `EVALUATE\n${declarations}\n${/^VAR\b/i.test(maskDax(body)) ? '' : 'RETURN '}${body}`
+}
+
 /** Source variables are copied from the verified live model, with only their required dependencies. */
 export function prepareSemanticQuery(input: { dax: string; sourceMeasure?: string; maxRows: number; context: SelectedContext; manifest: BiManifest; results?: VerifiedResult[] }) {
-  const dax = boundedReadQuery(normalizeResultReferences(input.dax, input.results, input.manifest), input.maxRows)
+  const dax = boundedReadQuery(normalizeResultReferences(localizeReadVariables(input.dax), input.results, input.manifest), input.maxRows)
   const requestedSource = input.sourceMeasure?.replace(/^.*\[|\]$/g, '').replace(/^'|'$/g, '').trim()
   let source = requestedSource && input.context.semanticSources?.find(source => source.measure.toLowerCase() === requestedSource.toLowerCase())
   const code = maskDax(dax), local = new Set([...code.matchAll(/\bVAR\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gi)].map(match => match[1].toLowerCase()))

@@ -37,6 +37,11 @@ test('derived DAX uses complete authenticated BI results and keeps temporary val
   const dax = 'EVALUATE ROW("Total", SUMX(_bi_result_0, [_bi_col_0_0]))'
   const compiled = prepareSemanticQuery({ dax, maxRows: 1, context, manifest, results })
   assert.equal(prepareSemanticQuery({ dax: dax.replace('[_bi_col_0_0]', '_bi_result_0[_bi_col_0_0]'), maxRows: 1, context, manifest, results }).dax, compiled.dax)
+  const local = prepareSemanticQuery({ dax: 'DEFINE VAR t = FILTER(_bi_result_0, [_bi_col_0_0] > 0) EVALUATE ROW("Total", SUMX(t, t[_bi_col_0_0]))',
+    maxRows: 1, context, manifest, results })
+  assert(local.dax.includes('SUMX(t, [_bi_col_0_0])'))
+  assert(!local.body.includes('DEFINE'))
+  assert.throws(() => prepareSemanticQuery({ dax: 'DEFINE MEASURE Events[Fake] = 1 EVALUATE ROW("Total", [Fake])', maxRows: 1, context, manifest, results }), /EVALUATE/)
   assert(compiled.dax.includes('VAR _bi_result_0 = UNION(ROW("_bi_col_0_0", 123.45), ROW("_bi_col_0_0", 76.55))'))
   const audit = auditResultQuery(compiled.dax)
   assert(!audit.includes('123.45') && !audit.includes('76.55'))
@@ -77,6 +82,8 @@ test('live scalar visuals expose their own native measure inputs and identify br
     formats: { Income: { type: 'currency' } } }] }), context, manifest, 'What is the income?')
   assert.equal(plan.explanation, 'Compare o realizado com a meta.')
   assert.equal(plan.queries[0].formats?.Income.type, 'currency')
+  assert.equal(parsePlan(JSON.stringify({ answerable: true, queries: [{ dax: 'EVALUATE ROW("Income", [Net income])',
+    formats: { Income: { type: 'decimal' } } }] }), context, manifest, 'What is the income?').queries[0].formats?.Income.type, 'number')
   const approved = parseReviewedPlan('{"approved":true}', plan, context, manifest, 'What is the income?')
   assert.deepEqual(approved.queries, plan.queries)
   assert.equal(approved.explanation, plan.explanation)

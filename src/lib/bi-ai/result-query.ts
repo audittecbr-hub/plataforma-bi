@@ -1,4 +1,4 @@
-import { maskDax } from './dax-source'
+import { maskDax, sourceTableFields, sourceVariables } from './dax-source'
 import type { BiManifest } from './manifest'
 
 export interface VerifiedResult { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }
@@ -23,14 +23,19 @@ export function resultCatalog(results: VerifiedResult[], manifest?: BiManifest) 
 
 /** DAX table variables use [alias], even when the planner qualifies a verified result field. */
 export function normalizeResultReferences(dax: string, results: VerifiedResult[] = [], manifest?: BiManifest): string {
-  return dax.replace(/"(?:[^"]|"")*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*|--[^\n]*|(?:'(_bi_result_\d+)'|(_bi_result_\d+))\s*\[((?:[^\]]|\]\])+)\]/gi,
+  const headers = results.map((result, index) => ({ name: `_bi_result_${index}`, expression: `SELECTCOLUMNS(ROW("placeholder", 0), ${resultColumns(result, index, manifest)
+    .map(column => `"${column.alias}", 0`).join(', ')})`, dependencies: [], aliases: resultColumns(result, index, manifest).map(column => column.alias) }))
+  const locals = sourceVariables(dax)
+  const fields = sourceTableFields({ measure: 'Query variables', table: '', description: '', variables: [...headers, ...locals] })
+  const candidates = new Set([...headers, ...locals].map(variable => variable.name.toLowerCase()))
+  return dax.replace(/"(?:[^"]|"")*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*|--[^\n]*|(?:'([A-Za-z_][A-Za-z0-9_]*)'|([A-Za-z_][A-Za-z0-9_]*))\s*\[((?:[^\]]|\]\])+)\]/gi,
     (full, quoted: string | undefined, plain: string | undefined, member: string | undefined) => {
       if (!member) return full
-      const name = (quoted ?? plain)!, result = results[Number(name.slice('_bi_result_'.length))]
-      if (!result) return full
-      const column = resultColumns(result, Number(name.slice('_bi_result_'.length)), manifest)
-        .find(column => column.alias.toLowerCase() === member.replaceAll(']]', ']').toLowerCase())
-      return column ? `[${column.alias.replaceAll(']', ']]')}]` : full
+      const name = (quoted ?? plain)!
+      if (!candidates.has(name.toLowerCase()) || manifest?.tables.some(table => table.name.toLowerCase() === name.toLowerCase())) return full
+      const actual = [...fields].find(([variable]) => variable.toLowerCase() === name.toLowerCase())?.[1]
+        ?.find(alias => alias.toLowerCase() === member.replaceAll(']]', ']').toLowerCase())
+      return actual ? `[${actual.replaceAll(']', ']]')}]` : full
     })
 }
 

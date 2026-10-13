@@ -55,7 +55,7 @@ function parseObject(text: string): Record<string, unknown> {
 function queryFormats(value: unknown): PlannedQuery['formats'] {
   const formats: NonNullable<PlannedQuery['formats']> = {}
   for (const [field, definition] of Object.entries(asRecord(value)).slice(0, 100)) {
-    const format = asRecord(definition)
+    const provided = asRecord(definition), format: Record<string, unknown> = { ...provided, type: provided.type === 'decimal' ? 'number' : provided.type }
     if (!['number', 'currency', 'percent'].includes(String(format.type))
       || format.type === 'percent' && !['ratio', 'points'].includes(String(format.percentScale))
       || format.decimals !== undefined && (!Number.isInteger(format.decimals) || Number(format.decimals) < 0 || Number(format.decimals) > 10)) {
