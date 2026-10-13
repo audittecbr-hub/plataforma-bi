@@ -5,8 +5,10 @@ import type { ConfigIa } from '../llm-config'
 import type { BiManifest } from './manifest'
 import type { PublishedSchema } from './fabric-schema'
 import { normalizeTerm } from './context'
+import { biProgress, type BiProgressReporter } from './progress'
+import { formatVerifiedAnswer } from './presentation'
 import { mapConcurrent } from './concurrency'
-import { validateReportReferences, matchReportMetrics, reportScope, factsFromReportHtml, formatReportFact,
+import { validateReportReferences, matchReportMetrics, reportScope, factsFromReportHtml, prepareReportHtml, factsFromPreparedReport,
   ReportEvidenceError, type ReportScope, type ReportReferenceContract, type ReportFact } from './report-evidence'
 
 function field(manifest: BiManifest, ref: string): string {
@@ -17,7 +19,7 @@ function field(manifest: BiManifest, ref: string): string {
   return `'${table.name.replaceAll("'", "''")}'[${column.name.replaceAll(']', ']]')}]`
 }
 
-export function reportReferenceDax(manifest: BiManifest, contract: ReportReferenceContract, scope: ReportScope): string {
+function reportReferenceExpression(manifest: BiManifest, contract: ReportReferenceContract, scope: ReportScope): string {
   if (!scope.months.length || !scope.months.every(month => /^20\d{2}-(?:0[1-9]|1[0-2])$/.test(month))
     || scope.products || scope.region && (contract.source.kind === 'static-html' && !contract.source.groupField
       || !Object.hasOwn(contract.source.regionLabels ?? {}, scope.region))) throw new ReportEvidenceError('Recorte não verificado.')
@@ -35,7 +37,28 @@ export function reportReferenceDax(manifest: BiManifest, contract: ReportReferen
     if (!value) throw new ReportEvidenceError('Operação desconhecida.')
     filters.push(`${field(manifest, contract.source.groupField)} = "${value.replaceAll('"', '""')}"`)
   }
-  return `EVALUATE ROW("ReportReference", ${filters.length ? `CALCULATE(${source}, ${filters.join(', ')})` : source})`
+  return filters.length ? `CALCULATE(${source}, ${filters.join(', ')})` : source
+}
+
+export function reportReferenceDax(manifest: BiManifest, contract: ReportReferenceContract, scope: ReportScope): string {
+  return `EVALUATE ROW("ReportReference", ${reportReferenceExpression(manifest, contract, scope)})`
+}
+
+export interface ReportQueryJob { contract: ReportReferenceContract; scope: ReportScope; metricIds: string[] }
+
+/** One evaluation snapshot, with shared expressions evaluated only once. */
+export function batchReportReferenceDax(manifest: BiManifest, jobs: ReportQueryJob[]) {
+  const expressions: string[] = [], indexes: number[] = []
+  for (const job of jobs) {
+    const expression = reportReferenceExpression(manifest, job.contract, job.scope)
+    let index = expressions.indexOf(expression)
+    if (index < 0) { index = expressions.length; expressions.push(expression) }
+    indexes.push(index)
+  }
+  if (!expressions.length) throw new ReportEvidenceError('Consulta sem indicadores.')
+  const aliases = expressions.map((_, index) => `ReportReference${index || ''}`)
+  const daxFor = (indexes: number[]) => `EVALUATE ROW(${indexes.map(index => `"${aliases[index]}", ${expressions[index]}`).join(', ')})`
+  return { dax: daxFor(expressions.map((_, index) => index)), indexes, aliases, expressions, daxFor }
 }
 
 export async function loadReportFacts(manifest: BiManifest, contract: ReportReferenceContract, scope: ReportScope,
@@ -52,6 +75,7 @@ export async function loadReportFacts(manifest: BiManifest, contract: ReportRefe
 export async function answerFromReportReference(input: {
   manifest: BiManifest; schema: PublishedSchema; question: string; config: ConfigIa; signal?: AbortSignal
   onQuery?: (entry: { dax: string; rowCount: number; durationMs: number; status: string; errorCode?: string }) => Promise<void>
+  onProgress?: BiProgressReporter
 }) {
   const contracts = validateReportReferences(input.manifest, input.schema)
   const normalized = normalizeTerm(input.question)
@@ -61,7 +85,7 @@ export async function answerFromReportReference(input: {
   if (!matched.length) return null
   const terms = contracts.flatMap(contract => [...contract.metrics.flatMap(metric => [metric.label, ...metric.aliases]),
     ...Object.values(contract.source.regionLabels ?? {})])
-  const jobs: { contract: ReportReferenceContract; scope: ReportScope; metricIds: string[] }[] = []
+  const jobs: ReportQueryJob[] = []
   const monthly = /mensal|mensais|evolucao|por mes|mes a mes/.test(normalized)
   const compare = /compar|diferenca|variacao/.test(normalized)
   const ranking = /ranking|por regional/.test(normalized)
@@ -81,19 +105,41 @@ export async function answerFromReportReference(input: {
   }
   const refreshBefore = await getLatestRefreshStatus(input.manifest.workspaceId, input.manifest.semanticModelId, input.signal)
   if (refreshBefore && ['Unknown', 'InProgress'].includes(refreshBefore.status)) throw new ReportEvidenceError('O modelo está sendo atualizado; repita a pergunta após a conclusão.')
-  const loaded = await mapConcurrent(jobs, 3, async job => {
-    const started = Date.now(), dax = reportReferenceDax(input.manifest, job.contract, job.scope)
+  const batch = batchReportReferenceDax(input.manifest, jobs)
+  input.onProgress?.(biProgress(2, 'Buscando os indicadores e recortes juntos no Power BI.'))
+  async function readBatch(indexes: number[]): Promise<{ row: Record<string, unknown>; dax: string }[]> {
+    const dax = batch.daxFor(indexes), started = Date.now()
     try {
-      const result = await loadReportFacts(input.manifest, job.contract, job.scope, job.metricIds, input.signal)
+      const rows = await executeDaxQuery({ workspaceId: input.manifest.workspaceId, semanticModelId: input.manifest.semanticModelId, dax, signal: input.signal })
+      if (rows.length !== 1) throw new ReportEvidenceError('Consulta não retornou a evidência completa.')
       await input.onQuery?.({ dax, rowCount: 1, durationMs: Date.now() - started, status: 'success' })
-      return result
+      return [{ row: rows[0], dax }]
     } catch (error) {
       await input.onQuery?.({ dax, rowCount: 0, durationMs: Date.now() - started, status: 'error',
         errorCode: error instanceof PowerBiQueryError ? error.code : 'REPORT_REFERENCE_INVALID' })
+      if (indexes.length > 1 && error instanceof PowerBiQueryError && /Resource Governance|memory limit|maior que o limite/i.test(error.message)) {
+        input.onProgress?.(biProgress(2, 'Dividindo a busca em blocos menores para respeitar a capacidade do BI.'))
+        // Sequential retries avoid multiplying pressure on the capacity that rejected the larger query.
+        const middle = Math.ceil(indexes.length / 2)
+        return [...await readBatch(indexes.slice(0, middle)), ...await readBatch(indexes.slice(middle))]
+      }
       throw error
     }
-  }, input.signal)
+  }
+  const groups = Array.from({ length: Math.ceil(batch.aliases.length / 2) }, (_, index) =>
+    Array.from({ length: Math.min(2, batch.aliases.length - index * 2) }, (_, offset) => index * 2 + offset))
+  const batches = (await mapConcurrent(groups, 3, readBatch, input.signal)).flat()
+  const row = Object.assign({}, ...batches.map(batch => batch.row)) as Record<string, unknown>
+  const prepared = new Map<string, ReturnType<typeof prepareReportHtml>>()
+  const loaded = jobs.map((job, index) => {
+    const key = `${batch.indexes[index]}:${contracts.indexOf(job.contract)}`, html = row[`[${batch.aliases[batch.indexes[index]]}]`]
+    if (typeof html !== 'string' || !html) throw new ReportEvidenceError('Indicador ausente na consulta agrupada.')
+    if (!prepared.has(key)) prepared.set(key, prepareReportHtml(html, job.contract))
+    return { facts: factsFromPreparedReport(prepared.get(key)!, job.scope,
+      job.contract.metrics.filter(metric => job.metricIds.includes(metric.id))) }
+  })
   let facts = loaded.flatMap((result, index) => result.facts.map(fact => ({ ...fact,
+    sourceMeasure: jobs[index].contract.measure,
     label: monthly || compare || ranking ? `${fact.label} (${jobs[index].scope.region
       ? jobs[index].contract.source.regionLabels?.[jobs[index].scope.region] : jobs[index].scope.months.join(', ')})` : fact.label })))
   if (ranking) facts = facts.sort((a, b) => a.metricId.localeCompare(b.metricId) || (b.value ?? -Infinity) - (a.value ?? -Infinity))
@@ -104,10 +150,12 @@ export async function answerFromReportReference(input: {
       for (const metric of metrics) {
         const before = loaded[indexes[0]].facts.find(fact => fact.metricId === metric.id)!, after = loaded[indexes.at(-1)!].facts.find(fact => fact.metricId === metric.id)!
         if (before.value !== null && after.value !== null) {
-          facts.push({ ...after, id: '', label: `Diferença ${metric.label} (último período menos primeiro${metric.format === 'percent' ? ', pontos percentuais' : ''})`,
+          facts.push({ ...after, id: '', metricId: `${metric.id}:difference`, sourceMeasure: contract.measure,
+            label: `Diferença ${metric.label} (último período menos primeiro${metric.format === 'percent' ? ', pontos percentuais' : ''})`,
             format: metric.format === 'percent' ? 'number' : after.format,
             value: after.value - before.value, scope: `${before.scope} → ${after.scope}` })
-          facts.push({ ...after, id: '', label: `Variação relativa ${metric.label}`, format: 'percent', precision: 0.005,
+          facts.push({ ...after, id: '', metricId: `${metric.id}:relative`, sourceMeasure: contract.measure,
+            label: `Variação relativa ${metric.label}`, format: 'percent', precision: 0.005,
             value: before.value === 0 ? null : (after.value - before.value) / Math.abs(before.value) * 100,
             scope: `${before.scope} → ${after.scope}` })
         }
@@ -115,11 +163,15 @@ export async function answerFromReportReference(input: {
     }
   }
   facts = facts.map((fact, index) => ({ ...fact, id: `f${index}` }))
+  input.onProgress?.(biProgress(3, 'A IA está analisando os dados consultados; os valores serão conferidos antes da resposta.'))
   // The model selects facts/relationships; numbers and comparison statements are rendered and checked by the server.
+  const eligible = facts.flatMap(left => facts.filter(right => left.id < right.id && canCompareReportFacts(left, right))
+    .map(right => ({ left: left.id, right: right.id })))
   const response = await conversar(input.config, [
-      { role: 'system', content: 'Analise a pergunta e as evidências verificadas. Retorne SOMENTE JSON {"factIds":["f0"],"comparisons":[{"left":"f0","right":"f1"}]}. Inclua os indicadores que respondem à pergunta. Para análises e comparações, selecione pares úteis do mesmo indicador em períodos/regiões diferentes ou realizado contra projetado. Use somente identificadores existentes. Não escreva números financeiros, causas presumidas ou texto livre. Os números e a relação maior/menor serão conferidos e escritos pelo servidor.' },
+      { role: 'system', content: 'Analise a pergunta e as evidências consultadas no BI. Retorne SOMENTE JSON {"comparisons":[{"left":"f0","right":"f1"}]}. Selecione comparações úteis dentre eligibleComparisons. Os indicadores solicitados já serão mostrados: não copie a lista de fatos ou seus identificadores. Se não houver pares elegíveis, retorne imediatamente {"comparisons":[]}. Não invente números, causas ou texto livre; a relação maior/menor será conferida com os valores consultados.' },
       { role: 'user', content: JSON.stringify({ question: input.question,
-        evidence: facts, rules: [...new Set(matched.flatMap(({ contract }) => contract.notes))] }) },
+        evidence: facts.map(({ id, label, value, format }) => ({ id, label, value, format })), eligibleComparisons: eligible,
+        scope, rules: [...new Set(matched.flatMap(({ contract }) => contract.notes))] }) },
     ], { temperatura: 0, maxTokens: 'maximum', reasoningEffort: input.config.reasoningEffort, jsonObrigatorio: true, signal: input.signal })
   let chosen: string[] = [], comparisons: { left: string; right: string }[] = []
   try {
@@ -134,13 +186,11 @@ export async function answerFromReportReference(input: {
   if (refreshKey(refreshBefore) !== refreshKey(refresh)) throw new ReportEvidenceError('A atualização do modelo mudou durante a análise; repita a pergunta para conferir a nova versão dos dados.')
   const selected = facts.filter(fact => chosen.includes(fact.id))
   const insights = renderReportComparisons(selected, comparisons)
-  const scopes = [...new Set(selected.map(fact => fact.scope))]
-  const answer = [...selected.map(formatReportFact), ...insights, `\nRecortes conferidos: ${scopes.join('; ')}.`,
-    `Fonte: ${[...new Set(matched.map(({ contract }) => contract.page))].join(', ')}, visuais publicados no Power BI.`,
-    ...(refresh?.status === 'Failed' ? ['A última tentativa de atualização falhou. A resposta usa os dados do snapshot que permanece publicado no Power BI.'] : []),
-    ...new Set(matched.flatMap(({ contract }) => contract.notes))].join('\n')
+  const answer = formatVerifiedAnswer({ facts: selected, insights,
+    pages: [...new Set(matched.map(({ contract }) => contract.page))],
+    notes: matched.flatMap(({ contract }) => contract.notes), refreshFailed: refresh?.status === 'Failed' })
   return { answer, facts: selected, tokens: response.tokens,
-    queries: loaded.map((result, index) => ({ purpose: `Conferência do visual ${jobs[index].contract.page} (${jobs[index].scope.months.join(', ')})`, dax: result.dax, rowCount: 1 })),
+    queries: batches.map(batch => ({ purpose: `Conferência conjunta dos indicadores e recortes solicitados`, dax: batch.dax, rowCount: 1 })),
     evidence: { modelHash: input.schema.modelHash, reportHash: input.schema.reportHash,
       measure: matched[0].contract.measure, page: matched[0].contract.page, scope: scope!,
       retrievedAt: new Date().toISOString(), refresh: refresh && { status: refresh.status, requestId: refresh.requestId, endTime: refresh.endTime },
@@ -148,17 +198,24 @@ export async function answerFromReportReference(input: {
       values: selected.map(({ metricId, label, value, precision, scope }) => ({ metricId, label, value, precision, scope })) } }
 }
 
+export function canCompareReportFacts(left: ReportFact, right: ReportFact): boolean {
+  if (left === right || left.format !== right.format || left.value === null || right.value === null
+    || left.sourceMeasure !== right.sourceMeasure) return false
+  if (left.metricId === right.metricId && left.scope !== right.scope) return true
+  if (left.scope !== right.scope) return false
+  return (left.metricId === 'realized' && /^target-[1-3]$/.test(right.metricId))
+    || (right.metricId === 'realized' && /^target-[1-3]$/.test(left.metricId))
+    || left.metricId === `${right.metricId}-budget` || right.metricId === `${left.metricId}-budget`
+}
+
 export function renderReportComparisons(facts: ReportFact[], comparisons: { left: string; right: string }[]): string[] {
   const statements = comparisons.flatMap(pair => {
     const left = facts.find(fact => fact.id === pair.left), right = facts.find(fact => fact.id === pair.right)
-    if (!left || !right || left === right || left.format !== right.format || left.value === null || right.value === null) return []
-    const sameMetric = left.metricId === right.metricId && left.scope !== right.scope
-    const actualBudget = left.scope === right.scope && [left.label, right.label].some(label => /realizada|realizado/.test(label))
-      && [left.label, right.label].some(label => /projetada|projetado/.test(label))
-      && normalizeTerm(left.label).split(' ')[0] === normalizeTerm(right.label).split(' ')[0]
-    if (!sameMetric && !actualBudget) return []
-    const difference = left.value - right.value, tolerance = Math.max(left.precision, right.precision)
-    const relation = Math.abs(difference) <= tolerance ? 'equivalente, na precisão exibida, a' : difference > 0 ? 'maior que' : 'menor que'
+    if (!left || !right || !canCompareReportFacts(left, right) || left.value === null || right.value === null) return []
+    const displayed = (fact: ReportFact) => Number(new Intl.NumberFormat('en-US', { useGrouping: false,
+      maximumFractionDigits: Math.min(4, Math.max(0, Math.round(-Math.log10(fact.precision * 2)))) }).format(fact.value!))
+    const difference = displayed(left) - displayed(right)
+    const relation = difference === 0 ? 'equivalente, na precisão exibida, a' : difference > 0 ? 'maior que' : 'menor que'
     return [`${left.label} é ${relation} ${right.label}.`]
   })
   return [...new Set(statements)]
