@@ -2,9 +2,14 @@ export type ReasoningEffort = 'auto' | 'none' | 'low' | 'medium' | 'high' | 'max
 
 const ALL: ReasoningEffort[] = ['auto', 'none', 'low', 'medium', 'high', 'max']
 
+export function deepSeekThinkingModel(providerId: string, model: string): boolean {
+  return providerId === 'deepseek' || (providerId === 'opencode-go'
+    && /^deepseek-(?:flash|v4(?:\.1)?-(?:flash(?:-vision-exp)?|pro))$/i.test(model))
+}
+
 /** The UI only offers levels the current HTTP adapter knows how to send. */
 export function reasoningOptions(providerId: string, model: string): ReasoningEffort[] {
-  if (providerId === 'deepseek') return ALL
+  if (deepSeekThinkingModel(providerId, model)) return ALL
   if (providerId === 'openai') {
     if (/^gpt-5-pro(?:\b|[.-])/i.test(model)) return ['auto', 'high']
     if (/^gpt-5\.(?:[1-9]|\d{2})(?:\b|[.-])/i.test(model)) return ['auto', 'none', 'low', 'medium', 'high']

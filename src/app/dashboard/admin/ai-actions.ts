@@ -72,8 +72,6 @@ export async function saveAiGlobal(input: {
   providerId: string
   model: string
   reasoningEffort: ReasoningEffort
-  plannerMaxTokens: number
-  answerMaxTokens: number
 }) {
   const userId = await requireAdminId()
   const selected = provider(input.providerId)
@@ -86,8 +84,7 @@ export async function saveAiGlobal(input: {
     return { ok: false, error: 'Configure e ative a chave do provedor antes de ligar o Chat.' }
   }
   const result = await salvarConfigIa({ provedorId: selected.id, modelo: model,
-    enabled: input.enabled, reasoningEffort: input.reasoningEffort,
-    plannerMaxTokens: input.plannerMaxTokens, answerMaxTokens: input.answerMaxTokens }, userId)
+    enabled: input.enabled, reasoningEffort: input.reasoningEffort }, userId)
   if (result.ok) revalidatePath('/dashboard/admin')
   return { ok: result.ok, error: result.erro }
 }
@@ -159,7 +156,7 @@ export async function testAiModel(providerId: string, rawModel: string, effort: 
     const answer = await conversar({ provedorId: providerId, modelo: model }, [
       { role: 'system', content: 'Responda exatamente OK.' },
       { role: 'user', content: 'Teste de conectividade.' },
-    ], { maxTokens: 1024, reasoningEffort: effort })
+    ], { maxTokens: 'maximum', reasoningEffort: effort })
     return { ok: !!answer.texto, error: answer.texto ? undefined : 'O provedor não retornou texto.',
       durationMs: answer.ms, model: answer.modelo }
   } catch (error) {

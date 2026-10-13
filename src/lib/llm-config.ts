@@ -18,7 +18,7 @@
 import { createAdminClient } from '@/utils/supabase/admin'
 import { PROVEDORES, PROVEDOR_PADRAO, obterProvedor, type AlvoIa } from '@/lib/llm'
 import { modelEnabled } from '@/lib/ai-keyring'
-import { isReasoningEffort, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
+import { deepSeekThinkingModel, isReasoningEffort, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
 
 const TABELA = 'gs_config_ia'
 const LINHA = 'global'
@@ -29,8 +29,6 @@ export interface ConfigIa extends AlvoIa {
     fonte: FonteConfig
     enabled: boolean
     reasoningEffort: ReasoningEffort
-    plannerMaxTokens: number
-    answerMaxTokens: number
 }
 
 function doAmbiente(): ConfigIa {
@@ -38,7 +36,7 @@ function doAmbiente(): ConfigIa {
     const p = obterProvedor(provedorId)
     const modelo = process.env.BI_AI_MODEL?.trim() || process.env.LLM_MODELO?.trim() || p.modeloPadrao
     return { provedorId: p.id, modelo, fonte: process.env.BI_AI_PROVIDER || process.env.LLM_PROVEDOR ? 'ambiente' : 'padrao',
-        enabled: process.env.BI_AI_ENABLED === 'true', reasoningEffort: 'auto', plannerMaxTokens: 3000, answerMaxTokens: 1600 }
+        enabled: process.env.BI_AI_ENABLED === 'true', reasoningEffort: deepSeekThinkingModel(p.id, modelo) ? 'max' : 'auto' }
 }
 
 /** O que o chat vai usar agora. Nunca lanca: configuração quebrada nao derruba o chat. */
@@ -47,7 +45,7 @@ export async function lerConfigIa(): Promise<ConfigIa> {
     try {
         const { data, error } = await createAdminClient()
             .from(TABELA)
-            .select('provedor_id, modelo, enabled, reasoning_effort, planner_max_tokens, answer_max_tokens')
+            .select('provedor_id, modelo, enabled, reasoning_effort')
             .eq('id', LINHA)
             .maybeSingle()
 
@@ -58,9 +56,7 @@ export async function lerConfigIa(): Promise<ConfigIa> {
         // provedor desconhecido no banco (ex.: removido do codigo) cai no padrao
         return { provedorId, modelo, fonte: 'banco',
             enabled: data.enabled === true,
-            reasoningEffort: isReasoningEffort(data.reasoning_effort) ? data.reasoning_effort : 'auto',
-            plannerMaxTokens: Number(data.planner_max_tokens) || 3000,
-            answerMaxTokens: Number(data.answer_max_tokens) || 1600 }
+            reasoningEffort: isReasoningEffort(data.reasoning_effort) ? data.reasoning_effort : 'auto' }
     } catch {
         return ambiente
     }
@@ -72,7 +68,7 @@ export async function lerConfigIa(): Promise<ConfigIa> {
  * porque a tabela nao tem politica de escrita para usuario comum.
  */
 export async function salvarConfigIa(
-    alvo: AlvoIa & { enabled: boolean; reasoningEffort: ReasoningEffort; plannerMaxTokens: number; answerMaxTokens: number },
+    alvo: AlvoIa & { enabled: boolean; reasoningEffort: ReasoningEffort },
     userId: string,
 ): Promise<{ ok: boolean; erro?: string }> {
     const provedor = obterProvedor(alvo.provedorId)
@@ -83,10 +79,6 @@ export async function salvarConfigIa(
     if (modelo.length > 160 || !/^[A-Za-z0-9._:/-]+$/.test(modelo)) return { ok: false, erro: 'Identificador do modelo inválido.' }
     if (!reasoningOptions(provedor.id, modelo).includes(alvo.reasoningEffort)) {
         return { ok: false, erro: 'O nível de raciocínio não é suportado por este provedor/modelo.' }
-    }
-    if (!Number.isInteger(alvo.plannerMaxTokens) || alvo.plannerMaxTokens < 1000 || alvo.plannerMaxTokens > 12000
-        || !Number.isInteger(alvo.answerMaxTokens) || alvo.answerMaxTokens < 500 || alvo.answerMaxTokens > 8000) {
-        return { ok: false, erro: 'Limites de tokens fora da faixa permitida.' }
     }
     if (!(await modelEnabled(provedor.id, modelo))) return { ok: false, erro: 'O provedor ou modelo está desativado.' }
 
@@ -100,8 +92,6 @@ export async function salvarConfigIa(
                     modelo,
                     enabled: alvo.enabled,
                     reasoning_effort: alvo.reasoningEffort,
-                    planner_max_tokens: alvo.plannerMaxTokens,
-                    answer_max_tokens: alvo.answerMaxTokens,
                     atualizado_em: new Date().toISOString(),
                     atualizado_por: userId,
                 },

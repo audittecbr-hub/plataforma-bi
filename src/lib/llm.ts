@@ -20,7 +20,8 @@
 
 import 'server-only'
 import { modelEnabled, readProviderKey, readProviderSettings } from '@/lib/ai-keyring'
-import { modelProtocol, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
+import { deepSeekThinkingModel, modelProtocol, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
+import { maximumOutputTokens } from '@/lib/ai-output'
 
 export type FormatoApi = 'openai-completions' | 'anthropic-messages'
 
@@ -51,7 +52,7 @@ export const PROVEDORES: ProvedorLlm[] = [
         envChaves: ['OPENCODE_API_KEY', 'OPENCODE_GO_API_KEY'],
         // Medido: sem este header a API recusa com MissingSessionID.
         headerSessao: { 'x-opencode-session': '' },
-        modeloPadrao: 'longcat-2.5-preview-free',
+        modeloPadrao: 'deepseek-v4.1-flash',
     },
     {
         id: 'anthropic',
@@ -179,12 +180,38 @@ export interface OpcoesConversa {
     /** 0 para decisao estavel; deixe indefinido ao redigir texto. */
     temperatura?: number
     jsonObrigatorio?: boolean
-    /** Corta resposta longa demais; protege custo. */
-    maxTokens?: number
+    /** 'maximum' selects the model's full output allowance, including reasoning. */
+    maxTokens?: number | 'maximum'
     /** Sessao de roteamento do provedor (OpenCode Go). */
     sessao?: string
     signal?: AbortSignal
     reasoningEffort?: ReasoningEffort
+}
+
+type OpcoesResolvidas = Omit<OpcoesConversa, 'maxTokens'> & { maxTokens?: number }
+
+const outputLimitCache = new Map<string, { expiresAt: number; value: number | undefined }>()
+
+async function fullOutputAllowance(p: ProvedorLlm, model: string, key: string): Promise<number | undefined> {
+    const cacheKey = `${p.id}:${p.baseUrl}:${model}`
+    const cached = outputLimitCache.get(cacheKey)
+    if (cached && cached.expiresAt > Date.now()) return cached.value
+    let metadata: unknown
+    try {
+        const headers: Record<string, string> = p.formato === 'anthropic-messages'
+            ? { 'x-api-key': key, ...(p.headers ?? {}) }
+            : { Authorization: `Bearer ${key}`, ...(p.headers ?? {}) }
+        if (p.headerSessao) for (const name of Object.keys(p.headerSessao)) headers[name] = crypto.randomUUID()
+        const response = await fetch(`${p.baseUrl}/models`, { headers, signal: AbortSignal.timeout(15_000) })
+        if (response.ok) {
+            const body = await response.json()
+            metadata = (body.data ?? body.models ?? []).find((entry: { id?: string; name?: string }) =>
+                (entry.id ?? entry.name) === model)
+        }
+    } catch { /* Use the documented ceiling when the live catalog is unavailable. */ }
+    const value = maximumOutputTokens(p.id, model, metadata)
+    outputLimitCache.set(cacheKey, { expiresAt: Date.now() + 10 * 60_000, value })
+    return value
 }
 
 /** Provedor + modelo escolhidos pelo administrador. */
@@ -233,7 +260,7 @@ async function conversarOpenAI(
     chave: string,
     modelo: string,
     mensagens: MensagemLlm[],
-    opcoes: OpcoesConversa
+    opcoes: OpcoesResolvidas
 ): Promise<RespostaLLm> {
     const t0 = Date.now()
     const sessao = opcoes.sessao || crypto.randomUUID()
@@ -266,7 +293,7 @@ async function conversarOpenAI(
         if (!reasoningOptions(p.id, modelo).includes(effort)) {
             throw new Error(`Nível de raciocínio não suportado por ${p.id}/${modelo}.`)
         }
-        if (p.id === 'deepseek') {
+        if (deepSeekThinkingModel(p.id, modelo)) {
             corpo.thinking = { type: effort === 'none' ? 'disabled' : 'enabled' }
             if (effort !== 'none') corpo.reasoning_effort = effort
             delete corpo.temperature
@@ -276,11 +303,12 @@ async function conversarOpenAI(
         }
     }
 
+    const timeout = AbortSignal.timeout(deepSeekThinkingModel(p.id, modelo) ? 270_000 : 90_000)
     const r = await fetch(`${p.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: cabecalhos,
         body: JSON.stringify(corpo),
-        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, AbortSignal.timeout(90_000)]) : AbortSignal.timeout(90_000),
+        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, timeout]) : timeout,
     })
 
     if (!r.ok) {
@@ -357,7 +385,7 @@ async function conversarAnthropic(
     chave: string,
     modelo: string,
     mensagens: MensagemLlm[],
-    opcoes: OpcoesConversa
+    opcoes: OpcoesResolvidas
 ): Promise<RespostaLLm> {
     const t0 = Date.now()
     const { sistema, resto } = paraAnthropic(mensagens)
@@ -440,7 +468,7 @@ async function conversarResponses(
     chave: string,
     modelo: string,
     mensagens: MensagemLlm[],
-    opcoes: OpcoesConversa,
+    opcoes: OpcoesResolvidas,
 ): Promise<RespostaLLm> {
     if (opcoes.ferramentas?.length || mensagens.some((message) => message.role === 'tool')) {
         throw new Error('Ferramentas não implementadas para este endpoint Responses.')
@@ -508,10 +536,13 @@ export async function conversar(
     }
     const modelo = alvo.modelo || p.modeloPadrao
 
+    const resolved: OpcoesResolvidas = { ...opcoes,
+        maxTokens: typeof opcoes.maxTokens === 'number' ? opcoes.maxTokens
+            : await fullOutputAllowance(p, modelo, chave) }
     const protocol = modelProtocol(p.id, modelo)
-    if (protocol === 'messages') return conversarAnthropic(p, chave, modelo, mensagens, opcoes)
-    if (protocol === 'responses') return conversarResponses(p, chave, modelo, mensagens, opcoes)
-    return conversarOpenAI(p, chave, modelo, mensagens, opcoes)
+    if (protocol === 'messages') return conversarAnthropic(p, chave, modelo, mensagens, resolved)
+    if (protocol === 'responses') return conversarResponses(p, chave, modelo, mensagens, resolved)
+    return conversarOpenAI(p, chave, modelo, mensagens, resolved)
 }
 
 /** Lista viva de modelos do provedor, filtrada pelo que ele realmente atende. */

@@ -10,6 +10,7 @@ import { validRegistrationSecret } from '../src/lib/bi-ai/registration-secret'
 import { executeDaxQuery, PowerBiQueryError, powerBiUserMessage } from '../src/lib/powerbi'
 import { decryptApiKey, encryptApiKey, parseEncryptionKey } from '../src/lib/ai-key-crypto'
 import { modelProtocol, modelSupportedByAdapter, reasoningOptions } from '../src/lib/ai-reasoning'
+import { DEEPSEEK_MAX_OUTPUT_TOKENS, maximumOutputTokens } from '../src/lib/ai-output'
 import { certifiedPlan, certifiedScopeMessage, validateCertifiedQueries } from '../src/lib/bi-ai/certified'
 import { assertPublishedCatalog, parsePublishedSchema, withPublishedSchema } from '../src/lib/bi-ai/fabric-schema'
 import { basicClarification, clarificationKey, continueClarification, issueClarificationToken,
@@ -462,7 +463,8 @@ test('admin API keys are encrypted and bound to their provider', () => {
 
 test('reasoning controls follow adapter and model support', () => {
   assert(reasoningOptions('deepseek', 'deepseek-flash').includes('high'))
-  assert.deepEqual(reasoningOptions('opencode-go', 'deepseek-v4.1-flash'), ['auto'])
+  assert(reasoningOptions('opencode-go', 'deepseek-v4.1-flash').includes('max'))
+  assert.deepEqual(reasoningOptions('opencode-go', 'longcat-2.5-preview-free'), ['auto'])
   assert(reasoningOptions('openai', 'gpt-5').includes('medium'))
   assert.deepEqual(reasoningOptions('openai', 'gpt-4o-mini'), ['auto'])
   assert(reasoningOptions('anthropic', 'claude-sonnet-4-6').includes('high'))
@@ -471,6 +473,21 @@ test('reasoning controls follow adapter and model support', () => {
   assert.equal(modelProtocol('opencode-go', 'gpt-6-luna'), 'responses')
   assert.equal(modelProtocol('opencode-go', 'qwen3.8-flash'), 'messages')
   assert(!modelSupportedByAdapter('opencode-go', 'unknown-future-protocol'))
+})
+
+test('long explanations retain their ending after sanitization', () => {
+  const answer = `${'Análise fundamentada nos resultados do modelo. '.repeat(130)}Conclusão completa.`
+  assert.equal(parseAnswer(JSON.stringify({ answer })), answer)
+  assert.equal(parseAnswer(JSON.stringify({ answer: `<p>${answer}</p>` })), answer)
+})
+
+test('the full output allowance uses the provider ceiling instead of portal token settings', () => {
+  assert.equal(maximumOutputTokens('opencode-go', 'deepseek-v4.1-flash'), DEEPSEEK_MAX_OUTPUT_TOKENS)
+  assert.equal(maximumOutputTokens('deepseek', 'deepseek-flash'), DEEPSEEK_MAX_OUTPUT_TOKENS)
+  assert.equal(maximumOutputTokens('opencode-go', 'deepseek-v4.1-flash', { max_output_tokens: 500_000 }), 500_000)
+  assert.equal(maximumOutputTokens('opencode-go', 'deepseek-v4.1-flash', { max_output_tokens: -1 }), DEEPSEEK_MAX_OUTPUT_TOKENS)
+  assert.equal(maximumOutputTokens('compatible', 'future-model', { max_output_tokens: 100_000 }), 100_000)
+  assert.equal(maximumOutputTokens('compatible', 'future-model'), undefined)
 })
 
 test('Power BI adapter uses a real shaped result and controls permission, DAX and timeout errors', async () => {
