@@ -2,14 +2,14 @@ import 'server-only'
 import { randomBytes, createCipheriv, createDecipheriv } from 'node:crypto'
 import { deflateRawSync, inflateRawSync } from 'node:zlib'
 import { clarificationKey } from './clarification'
-import type { QueryPlan } from './plan'
+import type { PlannedQuery, QueryPlan } from './plan'
 import type { RefreshHistoryItem } from '../powerbi'
 
 export interface AnalysisCheckpoint {
   userId: string; dashboardId: string; conversationId: string; question: string
   modelHash: string; reportHash?: string; issuedAt: number; started: number; round: number
   inspected: string[]; exploration: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }[]
-  queryMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string }[]
+  queryMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string; formats?: PlannedQuery['formats'] }[]
   tokens: number; feedback: string; invalidPlans: number; refreshBefore: RefreshHistoryItem | null
   catalogResults?: unknown[]
   plan?: QueryPlan

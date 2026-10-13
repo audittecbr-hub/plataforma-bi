@@ -10,7 +10,7 @@ import { expandContextFromPlan, inspectCatalog, normalizeTerm, preloadPlannerCon
 import { mapConcurrent } from './concurrency'
 import { answerFromReportReference, loadReportFacts } from './report-reference'
 import { ReportEvidenceError, validateReportReferences, formatReportValue, type ReportFact } from './report-evidence'
-import { formatVerifiedAnswer } from './presentation'
+import { answerContext, formatVerifiedAnswer, resultValue } from './presentation'
 import { biProgress, type BiProgressReporter } from './progress'
 import { escapeMarkdown, SOURCE_SECTION } from './message-format'
 import { isGeneralJobLookup, jobCodeIn, resolveJobContext } from './entity-context'
@@ -20,6 +20,9 @@ import { maskDax, usesPublishedDataRule, sourceTableFields } from './dax-source'
 import { publishedAggregations } from './source-analysis'
 import { PLANNER_INSTRUCTIONS } from './planner-instructions'
 import { focusedPlannerContext, plannerReportReferences, rankSemanticSources } from './planner-context'
+import { nativeMeasureRules } from './measure-dependencies'
+import { readWithCapacityFallback, reuseRowCalculations } from './dax-performance'
+import { auditResultQuery, resultCatalog } from './result-query'
 import { issueAnalysisCheckpoint, readAnalysisCheckpoint, type AnalysisCheckpoint } from './analysis-checkpoint'
 import { publishedSchema, recheckPublishedSchema } from './fabric-context'
 import { PublishedSchemaError, withPublishedSchema, type PublishedSchema } from './fabric-schema'
@@ -28,7 +31,7 @@ import { clarificationKey, ClarificationError,
   type ClarificationPrompt } from './clarification'
 import { previousTurns, recordQueryLog as persistQueryLog, recordTurn, resolveConversation, takeRateLimit } from './conversations'
 import { type BiManifest } from './manifest'
-import { answerIsGrounded, normalizeGroupedRows, parseAnswer, parsePlan, prepareGroupedExecution,
+import { answerIsGrounded, normalizeGroupedRows, parseAnswer, parsePlan, parseReviewedPlan, prepareGroupedExecution,
   trimResults, metadataOnlyQuestion, type PlannedQuery, type QueryPlan } from './plan'
 
 const MAX_MESSAGE = 8000
@@ -43,34 +46,25 @@ export interface BiAuditServices {
   recordQueryLog: typeof persistQueryLog
 }
 
-function formatarValor(value: unknown): string {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 2 }).format(value)
-  }
-  return String(value ?? '')
-}
-
 /**
  * Último recurso quando o explicador falha duas vezes.
  * Antes daqui saía `JSON.stringify(...)` e o usuário via JSON cru na tela.
  */
-function resumoLegivel(results: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }[]): string {
+function resumoLegivel(results: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean; formats?: PlannedQuery['formats'] }[]): string {
   const blocos = results.map((result) => {
-    const lead = result.purpose.split(/\s+[—–]\s+/)[0]
-    const heading = result.purpose.length <= 120 ? result.purpose : lead.length <= 90 ? lead
-      : `${result.purpose.slice(0, 105).replace(/\s+\S*$/, '')}…`
-    const title = `### 🔎 ${escapeMarkdown(heading)}`
+    const title = `### ${escapeMarkdown(result.purpose)}`
     if (!result.rows.length) return `${title}\n\n- Sem dados neste recorte.`
     const label = (key: string) => escapeMarkdown((key.includes('[') ? key.slice(key.indexOf('[') + 1).replace(/\]$/, '') : key)
       .replace(/^v(?=[A-Z])/, '').replaceAll('_', ' ').replace(/([a-záéíóúãõ])([A-Z])/g, '$1 $2'))
-    const value = (entry: unknown) => escapeMarkdown(formatarValor(entry)).replace(/\r?\n/g, ' · ')
+    const value = (entry: unknown, key: string) => escapeMarkdown(resultValue(entry, result.formats?.[key]
+      ?? result.formats?.[key.replace(/^.*\[|\]$/g, '')])).replace(/\r?\n/g, ' · ')
     const keys = [...new Set(result.rows.flatMap(row => Object.keys(row)))]
-    const content = result.rows.length === 1 ? Object.entries(result.rows[0]).map(([key, entry]) => `- **${label(key)}:** ${value(entry)}`).join('\n')
+    const content = result.rows.length === 1 ? Object.entries(result.rows[0]).map(([key, entry]) => `- **${label(key)}:** ${value(entry, key)}`).join('\n')
       : [`| ${keys.map(label).join(' | ')} |`, `| ${keys.map(() => '---').join(' | ')} |`,
-        ...result.rows.map(row => `| ${keys.map(key => value(row[key])).join(' | ')} |`)].join('\n')
+        ...result.rows.map(row => `| ${keys.map(key => value(row[key], key)).join(' | ')} |`)].join('\n')
     return `${title}\n\n${content}${result.truncated ? '\n\n> ⚠️ Há mais registros. Refine os filtros para consultar o restante; os valores acima são as linhas retornadas.' : ''}`
   })
-  return `### 📊 Resultados do Power BI\n\n${blocos.join('\n\n')}`
+  return blocos.join('\n\n')
 }
 
 /**
@@ -291,6 +285,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   }
   const plannerContext = () => focusedPlannerContext(context, input.manifest, message,
     executionContext().semanticSources ?? [], [...inspectedObjects], currentReportRules)
+  const plannerReferences = () => plannerReportReferences(currentReportRules, [...inspectedObjects].map(name => name.split('::')[0]))
   const plannerSystem = PLANNER_INSTRUCTIONS
   if (checkpoint && liveSchema) context.semanticSources = context.semanticSources?.map(source => inspectedObjects.has(source.measure)
     ? structuredClone(liveSchema!.measures.find(measure => measure.name === source.measure)!.semanticSource!) : source)
@@ -299,7 +294,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   let planError = checkpoint?.feedback ?? ''
   let invalidPlans = checkpoint?.invalidPlans ?? 0
   const exploration: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }[] = checkpoint?.exploration ?? []
-  const explorationMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string }[] = checkpoint?.queryMeta ?? []
+  const explorationMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string; formats?: PlannedQuery['formats'] }[] = checkpoint?.queryMeta ?? []
   const modelActivity = (step: 1 | 2 | 3, reasoning: string, output: string) => (activity: 'reasoning' | 'output') => {
     input.onProgress?.({ ...biProgress(step, activity === 'reasoning' ? reasoning : output), completedQueries: explorationMeta.length })
   }
@@ -329,21 +324,27 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       tokens: plannerTokens, feedback: planError, invalidPlans, refreshBefore, catalogResults, ...(plan ? { plan } : {}) }), queries: [], assumptions: [] }
   }
   const executePlanned = async (query: PlannedQuery) => {
-    const prepared = prepareSemanticQuery({ ...query, context: executionContext(), manifest: input.manifest })
-    const execution = prepared.sourceMeasure ? { dax: prepared.dax } : prepareGroupedExecution(prepared.dax, query.maxRows)
-    const began = Date.now()
-    try {
-      const raw = await executeDaxQuery({ workspaceId: input.manifest.workspaceId, semanticModelId: input.manifest.semanticModelId,
-        dax: execution.dax, signal: input.signal })
-      const normalized = normalizeGroupedRows(raw, execution, message), result = trimResults(normalized.rows, query.maxRows)
-      await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id, semanticModelId: input.manifest.semanticModelId,
-        dax: execution.dax, durationMs: Date.now() - began, rowCount: result.rowCount, status: 'success' })
-      return { query: { ...query, dax: execution.dax, body: prepared.body, sourceMeasure: prepared.sourceMeasure }, ...result, blankGroupsExcluded: normalized.blankGroupsExcluded }
-    } catch (error) {
-      await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id, semanticModelId: input.manifest.semanticModelId,
-        dax: execution.dax, durationMs: Date.now() - began, rowCount: 0, status: 'error', errorCode: error instanceof PowerBiQueryError ? error.code : 'UNKNOWN' })
-      throw error
+    const prepared = prepareSemanticQuery({ ...query, context: executionContext(), manifest: input.manifest, results: exploration })
+    const shaped = prepared.sourceMeasure ? { dax: prepared.dax } : prepareGroupedExecution(prepared.dax, query.maxRows)
+    const execution = { ...shaped, dax: reuseRowCalculations(shaped.dax) }
+    const read = async (dax: string) => {
+      const began = Date.now()
+      try {
+        const rows = await executeDaxQuery({ workspaceId: input.manifest.workspaceId, semanticModelId: input.manifest.semanticModelId,
+          dax, signal: input.signal })
+        await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id, semanticModelId: input.manifest.semanticModelId,
+          dax: auditResultQuery(dax), durationMs: Date.now() - began, rowCount: rows.length, status: 'success' })
+        return rows
+      } catch (error) {
+        await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id, semanticModelId: input.manifest.semanticModelId,
+          dax: auditResultQuery(dax), durationMs: Date.now() - began, rowCount: 0, status: 'error', errorCode: error instanceof PowerBiQueryError ? error.code : 'UNKNOWN' })
+        throw error
+      }
     }
+    const raw = await readWithCapacityFallback(execution.dax, read, () => input.onProgress?.(biProgress(2,
+      'A consulta excedeu a memória do BI. Dividindo os cálculos em leituras menores, com as mesmas fórmulas e filtros.')))
+    const normalized = normalizeGroupedRows(raw, execution, message), result = trimResults(normalized.rows, query.maxRows)
+    return { query: { ...query, dax: auditResultQuery(execution.dax), body: prepared.body, sourceMeasure: prepared.sourceMeasure }, ...result, blankGroupsExcluded: normalized.blankGroupsExcluded }
   }
   const loadRequestedReportFacts = async (requests: NonNullable<QueryPlan['reportRequests']>) => {
     if (!liveSchema) throw new Error('A definição publicada está indisponível.')
@@ -364,12 +365,13 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     const response = await conversar(config, [
       { role: 'system', content: plannerSystem },
       { role: 'user', content: JSON.stringify({ dashboard: input.dashboard.name,
-        context: plannerContext(), verifiedReportRules: plannerReportReferences(currentReportRules) }) },
+        context: plannerContext(), verifiedReportRules: plannerReferences() }) },
       { role: 'user', content: JSON.stringify({
         question: message,
         currentDate: new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date()),
         history,
         exploration,
+        verifiedResults: resultCatalog(exploration, input.manifest),
         catalogResults,
         feedback,
       }) },
@@ -378,7 +380,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       onActivity: modelActivity(exploration.length ? 2 : 1, 'A IA está analisando as regras para escolher as próximas consultas.', 'A IA está concluindo o plano das próximas consultas.') })
     plannerTokens += response.tokens
     try {
-      const candidate = parsePlan(response.texto ?? '', executionContext(), input.manifest, message)
+      const candidate = parsePlan(response.texto ?? '', executionContext(), input.manifest, message, exploration)
       if (candidate.catalogSearch) {
         const terms = candidate.catalogSearch.map(normalizeTerm)
         const matches = (object: { name: string; description: string; synonyms: string[] }) => terms.some(term =>
@@ -423,7 +425,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
           const results = await mapConcurrent(candidate.queries, 3, executePlanned, input.signal)
           exploration.push(...results.map(result => ({ purpose: result.query.purpose, rows: result.rows, truncated: result.truncated })))
           explorationMeta.push(...results.map(result => ({ purpose: result.query.purpose, dax: result.query.dax, rowCount: result.rowCount,
-            body: result.query.body, sourceMeasure: result.query.sourceMeasure })))
+            body: result.query.body, sourceMeasure: result.query.sourceMeasure, formats: result.query.formats })))
           planError = 'Exploração executada. Analise as linhas reais e conclua ou investigue o que falta.'
         } catch (error) {
           if (!(error instanceof PowerBiQueryError) || error.code !== 'INVALID_DAX') throw error
@@ -438,7 +440,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       const expanded = expandContextFromPlan(context, input.manifest, response.texto ?? '')
       if (expanded !== context) {
         context = expanded
-        try { plan = parsePlan(response.texto ?? '', executionContext(), input.manifest, message); break }
+        try { plan = parsePlan(response.texto ?? '', executionContext(), input.manifest, message, exploration); break }
         catch { /* The retry receives the enriched metadata. */ }
       }
       const draft = response.texto ?? ''
@@ -476,7 +478,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       if (!meta || !meta.body && /^DEFINE\b/i.test(meta.dax.trim()) || !liveSchema?.measures.some(measure => measure.semanticSource)
         || !/\b(?:TOPN|SUM|SUMX|GROUPBY|SUMMARIZECOLUMNS|DISTINCTCOUNT|COUNTROWS|AVERAGE)\b/i.test(maskDax(meta.body ?? meta.dax))) return []
       return [{ purpose: exploration[index]?.purpose ?? meta.purpose, dax: meta.body ?? meta.dax, sourceMeasure: meta.sourceMeasure,
-        maxRows: Math.max(100, exploration[index]?.rows.length ?? 100) }]
+        maxRows: Math.max(100, exploration[index]?.rows.length ?? 100), formats: meta.formats }]
     })
     if (unreviewed.length) return continueAnalysis({ ...plan, answerResults: undefined, queries: unreviewed })
     const selected = plan.answerResults.map(selection => {
@@ -497,10 +499,11 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         if (!Object.hasOwn(row, field)) throw new BiAiError(502, 'ANSWER_FIELD_MISSING', 'Um campo escolhido não está na fonte consultada.')
         return [field, row[field]]
       })))
-      return { purpose: selection.title, rows, truncated: source.truncated }
+      return { purpose: selection.title, rows, truncated: source.truncated, formats: explorationMeta[selection.index]?.formats }
     })
     const refresh = await verifyCurrentData()
-    const answer = [resumoLegivel(selected), ...(refresh?.status === 'Failed' ? ['> ⚠️ A última atualização falhou. Estes são os dados disponíveis no modelo Power BI.'] : []),
+    const answer = [answerContext(plan.explanation, `A análise reúne os registros consultados no relatório ${escapeMarkdown(input.dashboard.name)}. Os resultados abaixo usam o recorte investigado e mantêm a associação entre cada item e seu valor.`),
+      resumoLegivel(selected), ...(refresh?.status === 'Failed' ? ['> ⚠️ A última atualização falhou. Estes são os dados disponíveis no modelo Power BI.'] : []),
       SOURCE_SECTION, `- **Fonte:** ${escapeMarkdown(input.dashboard.name)}, consultado no Power BI.`,
       ...selected.map(result => `- **Consulta:** ${escapeMarkdown(result.purpose)}`)].join('\n\n')
     input.onProgress?.(biProgress(3, 'Conferindo os registros e os valores já consultados antes de responder.'))
@@ -519,9 +522,9 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       label: counts.get(fact.label)! > 1 ? `${fact.label} (${displaySource(result.contract.measure)})` : fact.label })))
     const formatted = formatVerifiedAnswer({ facts, insights: [], pages: [...new Set(loaded.map(result => result.contract.page))],
       notes: loaded.flatMap(result => result.contract.notes), refreshFailed: refresh?.status === 'Failed' })
-    const groups = loaded.map(result => `### 📂 ${escapeMarkdown(displaySource(result.contract.measure))}\n\n${result.facts
+    const groups = loaded.map(result => `### ${escapeMarkdown(displaySource(result.contract.measure))}\n\n${result.facts
       .map(fact => `- **${escapeMarkdown(fact.label)}:** ${formatReportValue(fact)}`).join('\n')}`)
-    const answer = loaded.length === 1 ? formatted : ['### 📊 Valores conferidos',
+    const answer = loaded.length === 1 ? formatted : [formatted.split('### Valores conferidos')[0].trim(), '### Valores conferidos',
       ...(refresh?.status === 'Failed' ? ['> ⚠️ A última atualização falhou. Estes são os dados que permanecem publicados no BI.'] : []),
       ...groups, formatted.slice(formatted.indexOf(SOURCE_SECTION))].join('\n\n')
     const queries = [...explorationMeta, ...loaded.map(result => ({ purpose: `Indicadores em ${result.contract.measure}`, dax: result.dax, rowCount: 1 }))]
@@ -535,12 +538,17 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
 
   if (!plan.reviewed && plan.queries.length && liveSchema) {
     const expressions = plan.queries.map(query => query.dax).join('\n')
-    const relevant = liveSchema.measures.flatMap(measure => measure.semanticSource ? [measure.semanticSource] : [])
+    const declaredSources = plan.queries.flatMap(query => liveSchema!.measures.find(measure => measure.name === query.sourceMeasure)?.semanticSource ?? [])
+    const derivesResults = plan.queries.some(query => /\b_bi_result_\d+\b/.test(maskDax(query.dax)))
+    const focusedSources = derivesResults ? liveSchema.measures.flatMap(measure => measure.semanticSource
+      && [...inspectedObjects].some(name => name.split('::')[0] === measure.name) ? [measure.semanticSource] : []) : []
+    const relevant = declaredSources.length ? [...new Set(declaredSources)] : focusedSources.length ? focusedSources : liveSchema.measures.flatMap(measure => measure.semanticSource ? [measure.semanticSource] : [])
       .filter(source => source.variables.some(variable => variable.expression && input.manifest.tables.some(table =>
         expressions.toLowerCase().replaceAll("'", '').includes(`${table.name.toLowerCase()}[`)
         && variable.expression.toLowerCase().replaceAll("'", '').includes(`${table.name.toLowerCase()}[`))))
-    const preparedQueries = plan.queries.map(query => prepareSemanticQuery({ ...query, context: executionContext(), manifest: input.manifest }))
+    const preparedQueries = plan.queries.map(query => prepareSemanticQuery({ ...query, context: executionContext(), manifest: input.manifest, results: exploration }))
     const pending = plan.queries.some(query => /\b(?:TOPN|SUM|SUMX|GROUPBY|SUMMARIZECOLUMNS|DISTINCTCOUNT|COUNTROWS|AVERAGE|MIN|MAX)\b/i.test(maskDax(query.dax)))
+      || declaredSources.length > 0 || derivesResults
     const sourceBacked = preparedQueries.every(query => usesPublishedDataRule(query.variables))
     if (pending && (sourceBacked || relevant.length)) {
       const sourceRules = sourceBacked ? preparedQueries.map(prepared => {
@@ -561,17 +569,18 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         if (index && !inspectedObjects.has(source.measure) && size + bytes > 42_000) return false; size += bytes; return true })
       input.onProgress?.(biProgress(2, 'Conferindo as regras do relatório antes de executar as consultas.'))
       const review = await conversar(config, [
-        { role: 'system', content: `Revise o plano DAX antes de executar. A pergunta é o objetivo; as regras são a definição atual do modelo publicado. Confira se CADA consulta realmente responde ao pedido, respeita a situação/status, a data do evento, chaves, deduplicação, grão, filtros, arredondamentos por registro e sentido da ordenação. SUM(Valor) com ROUND só no final pode diferir de SUMX(tabela, ROUND(Valor, 2)) usado no visual. Não acrescente análises não solicitadas. Um pedido pelo maior/menor elemento pede o vencedor e empates, não uma lista grande. Purpose deve ser um título curto; coloque filtros em assumptions. Para indicadores do relatório, use exatamente a regra publicada; para um recorte explicitamente diferente pedido pelo usuário, preserve o recorte e informe a diferença. Prefira sourceMeasure com as variáveis publicadas; o servidor injeta as dependências completas. A medida HTML não é um número. Retorne somente JSON de plano final {"answerable":true,"queries":[{"purpose":"...","dax":"EVALUATE ...","maxRows":100,"sourceMeasure":"opcional"}],"assumptions":[]}. Campos da variável são [alias]. Se o plano já está correto, mantenha-o. Não peça esclarecimento sobre informação já disponível na pergunta ou nas regras.` },
+        { role: 'system', content: `Revise o plano DAX antes de executar. Retorne somente JSON. A pergunta é o objetivo; as regras são a definição atual do modelo publicado. Confira se CADA consulta responde ao pedido, preserva status, data do evento, chaves, deduplicação, grão, filtros, arredondamento por registro e ordenação. SUM(Valor) com ROUND só no final pode diferir de SUMX(tabela, ROUND(Valor, 2)) usado no visual. Use a expressão publicada para o indicador; outro recorte explicitamente pedido é válido e deve ser declarado. Uma medida auxiliar de nome parecido não redefine a fórmula do visual. missingTables indica dependência quebrada. Uma medida HTML é apresentação. Variáveis escalares não são reavaliadas ao mudar filtros; a expressão deve estar dentro do contexto do período. Em iteradores, filtros explícitos não podem apagar a dimensão que está sendo comparada. Projeção precisa de método e horizonte explícitos, inclui o restante do mês corrente ou projeta desde o último mês fechado sem contar o parcial novamente; gap sozinho não é previsão. Não acrescente novos cenários, consultas ou métricas por iniciativa própria. Se o plano já é adequado, retorne SOMENTE {"approved":true}, sem repetir ou reescrever o plano. Se houver erro concreto, retorne {"approved":false,"issues":[{"queryIndex":0,"reason":"problema encontrado"}],"queries":[todas as consultas originais, corrigindo apenas as identificadas],"assumptions":[]}. Preserve a quantidade, o objetivo, explanation e formats; se mudar uma regra ou método, ajuste também a explicação. Percentuais em formats têm type percent e percentScale ratio ou points conforme o DAX. Não peça esclarecimento sobre informação já disponível.` },
         { role: 'user', content: JSON.stringify({ question: message, plan,
-          context: sourceBacked ? undefined : focusedPlannerContext(context, input.manifest, message, []),
-          publishedRules: sourceRules ?? sources, visualIndicators: plannerReportReferences(currentReportRules) }) },
+          context: sourceBacked ? undefined : plannerContext(),
+          ...(derivesResults ? { verifiedResults: resultCatalog(exploration, input.manifest), resultProvenance: explorationMeta } : {}),
+          nativeInputs: nativeMeasureRules([expressions, ...(derivesResults ? explorationMeta.map(query => query.body ?? query.dax) : []),
+            ...(sourceRules ?? sources).flatMap(source => source.variables.map(variable => variable.expression))], liveSchema, input.manifest),
+          publishedRules: sourceRules ?? sources, visualIndicators: plannerReportReferences(currentReportRules, [...new Set((sourceRules ?? sources).map(source => source.measure))]) }) },
       ], { temperatura: 0, maxTokens: 'maximum', sessao: session, reasoningEffort: config.reasoningEffort, jsonObrigatorio: true, signal: input.signal,
         onActivity: modelActivity(2, 'A IA está conferindo os filtros e cálculos com as fórmulas publicadas.', 'A conferência das regras está sendo concluída.') })
       plannerTokens += review.tokens
       try {
-        const corrected = parsePlan(review.texto ?? '', executionContext(), input.manifest, message)
-        if (!corrected.answerable || !corrected.queries.length || corrected.inspect || corrected.exploratory) throw new Error('A revisão precisa concluir as consultas.')
-        return continueAnalysis({ ...corrected, reviewed: true })
+        return continueAnalysis(parseReviewedPlan(review.texto ?? '', plan, executionContext(), input.manifest, message, exploration))
       } catch (error) {
         planError = `A revisão das consultas precisa ser corrigida: ${error instanceof Error ? error.message : 'plano inválido'}`
         return continueAnalysis()
@@ -595,7 +604,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       plannerTokens += response.tokens
       let candidate: PlannedQuery
       try {
-        const repaired = parsePlan(response.texto ?? '', executionContext(), input.manifest, message)
+        const repaired = parsePlan(response.texto ?? '', executionContext(), input.manifest, message, exploration)
         if (!repaired.answerable || repaired.queries.length !== 1) throw new Error('Correção sem consulta única.')
         candidate = repaired.queries[0]
       } catch (error) {
@@ -645,15 +654,17 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     rows: result.rows,
     rowCount: result.rowCount,
     truncated: result.truncated,
+    formats: result.query.formats,
     types: Object.fromEntries(Object.entries(result.rows[0] ?? {}).map(([key, value]) => [key, typeof value])),
   }))
   // Row/field association is authoritative; a generated paragraph must not attach one row's amount to another entity.
   if (!semConsulta) {
     const notes = [notaDeEscopo(message, context), ...plan.assumptions,
       ...dataForAnswer.filter(result => result.purpose.length > 120).map(result => `Consulta: ${result.purpose}`)].filter(Boolean)
-    const answer = [resumoLegivel(dataForAnswer),
+    const answer = [answerContext(plan.explanation, `A análise usa os dados publicados do relatório ${escapeMarkdown(input.dashboard.name)}. Os resultados abaixo mostram ${dataForAnswer.map(result => escapeMarkdown(result.purpose)).join('; ')}, considerando os períodos e filtros informados na pergunta.`),
+      resumoLegivel(dataForAnswer),
       ...(refresh?.status === 'Failed' ? ['> ⚠️ A última atualização falhou. Estes são os dados disponíveis no modelo Power BI.'] : []),
-      '### 🧾 Fonte e filtros', `- **Fonte:** ${escapeMarkdown(input.dashboard.name)}, consultado no Power BI.`,
+      SOURCE_SECTION, `- **Fonte:** ${escapeMarkdown(input.dashboard.name)}, consultado no Power BI.`,
       ...notes.map(note => `- ${escapeMarkdown(note)}`)].join('\n\n')
     await saveTurn({ ...input, conversationId, message, answer, queries: queryMeta,
       provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
@@ -662,7 +673,8 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   }
   const explainerSystem = `Explique em português os resultados do Power BI. Use apenas valores presentes nas linhas recebidas. Não invente números, não faça cálculo manual que deveria ser feito no modelo e não some linhas truncadas. Se os dados forem insuficientes, diga isso. Cite o período/filtros somente quando aparecerem na pergunta ou nas linhas. O relatório Publish to web não informa slicers ativos; considere somente filtros descritos pelo usuário.
 Quando a pergunta for sobre o PRÓPRIO RELATÓRIO e não houver linhas de resultado, responda com o campo reference: use reportMap para dizer o que cada página mostra e quais filtros ela tem, e as descrições das medidas para explicar indicadores, regras e cuidados. Nesse caso não há números para citar: descreva com palavras.
-Organize com títulos curtos, tópicos, linhas em branco e emojis úteis (📊 resultados, 🔎 análise, ⚠️ cuidados). Comece com a resposta direta e evite repetir contexto ou escrever blocos longos. Use tabelas para comparar dados; mantenha todos os fatos necessários à pergunta. Sem HTML. Retorne SOMENTE JSON: {"answer": string}.`
+Explique o significado no negócio. Nomes de variáveis, blocos internos, aliases e códigos de medidas só ajudam quando o usuário pede a fórmula técnica; para os demais pedidos, use os nomes compreensíveis das etapas e indicadores. A unidade R$ pode ser mencionada sem inventar um valor.
+Comece com um parágrafo curto que explique o indicador ou a regra em linguagem simples para quem conhece pouco o negócio. Depois organize detalhes com títulos curtos, tópicos e linhas em branco. Use emojis somente quando tiverem função clara, como ⚠️ para um cuidado real; não decore todos os títulos ou itens. Escreva frases completas, sem truncar com reticências. Use tabelas quando ajudarem a comparar dados; mantenha todos os fatos necessários à pergunta. Sem HTML. Retorne SOMENTE JSON: {"answer": string}.`
   const reference = semConsulta ? {
     modelStructure: { tables: input.manifest.tables.length, columns: input.manifest.tables.reduce((count, table) => count + table.columns.length, 0),
       measures: input.manifest.measures.length, tableNames: input.manifest.tables.map(table => table.name) },
@@ -690,7 +702,7 @@ Organize com títulos curtos, tópicos, linhas em branco e emojis úteis (📊 r
     try {
       answer = parseAnswer(response.texto ?? '')
       // Sem linhas não há o que ancorar: a resposta vem do contexto do relatório.
-      if (semConsulta ? !/R\$/.test(answer) && answerIsGrounded(answer, [[{ reference: JSON.stringify(reference) }]], message)
+      if (semConsulta ? !/R\$\s*[-+]?\s*\d/.test(answer) && answerIsGrounded(answer, [[{ reference: JSON.stringify(reference) }]], message)
         : answerIsGrounded(answer, queryResults.map((result) => result.rows), message)) break
       answer = ''
     } catch (error) { console.error('[bi-ai] invalid explanation:', error) }

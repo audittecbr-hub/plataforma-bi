@@ -78,8 +78,9 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
       else {
         const answer = await work()
         assert('answer' in answer)
-        assert(answer.answer?.startsWith('### 📊 Resultados do Power BI\n\n### 🔎 Consulta 0\n\n- **Receita0:** 123\n\n### 🔎 Consulta 1\n\n- **Receita1:** 123\n\n### 🔎 Consulta 2\n\n- **Receita2:** 123'))
-        assert(answer.answer?.includes('### 🧾 Fonte e filtros'))
+        assert(answer.answer?.startsWith('A análise usa os dados publicados'))
+        assert(answer.answer?.includes('### Consulta 0\n\n- **Receita0:** 123\n\n### Consulta 1\n\n- **Receita1:** 123\n\n### Consulta 2\n\n- **Receita2:** 123'))
+        assert(answer.answer?.includes('### Fonte e filtros'))
         assert.deepEqual(answer.queries.map(query => query.purpose), ['Consulta 0', 'Consulta 1', 'Consulta 2'])
       }
       assert.equal(queries, 3)
