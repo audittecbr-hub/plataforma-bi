@@ -28,7 +28,9 @@ export interface PublishedSchema {
 export class PublishedSchemaError extends Error {}
 
 function decode(part: FabricPart): string {
-  if (part.payloadType !== 'InlineBase64' || part.payload.length > 600_000) {
+  // Tabelas com painéis HTML podem concentrar quase toda a definição em uma
+  // parte. O transporte já limita a resposta completa do Fabric a 5 MB.
+  if (part.payloadType !== 'InlineBase64' || part.payload.length > 5_000_000) {
     throw new PublishedSchemaError('Parte da definição Fabric inválida ou excessiva.')
   }
   return Buffer.from(part.payload, 'base64').toString('utf8')

@@ -272,6 +272,22 @@ test('Fabric definition parser keeps model and report schema without source conn
   assert.doesNotThrow(() => assertPublishedCatalog(stale, schema, false))
 })
 
+test('large HTML measures do not prevent the rest of the published model from being cataloged', () => {
+  const table = `table Regional\n\tcolumn Valor\n\tmeasure Total = SUM(Regional[Valor])\n\tmeasure Painel_HTML = "<div>${'x'.repeat(500_000)}</div>"\n\tpartition Regional = m\n\t\tsource = Sql.Database("private-server", "db")`
+  const schema = parsePublishedSchema([{ path: 'definition/tables/Regional.tmdl',
+    payloadType: 'InlineBase64', payload: Buffer.from(table).toString('base64') }])
+  assert.deepEqual(schema.columns, [{ name: 'Valor', table: 'Regional' }])
+  assert.deepEqual(schema.measures, [
+    { name: 'Total', table: 'Regional', expression: 'SUM(Regional[Valor])' },
+    { name: 'Painel_HTML', table: 'Regional', expression: '' },
+  ])
+  assert(!JSON.stringify(schema).includes('private-server'))
+  assert.throws(() => parsePublishedSchema([{ path: 'definition/tables/Regional.tmdl',
+    payloadType: 'InlineBase64', payload: 'x'.repeat(5_000_004) }]), /excessiva/)
+  assert.throws(() => parsePublishedSchema([{ path: 'definition/tables/Regional.tmdl',
+    payloadType: 'Remote', payload: '' }]), /inválida/)
+})
+
 test('the published model hash ignores model.tmdl so registered manifests stay valid', () => {
   const part = (path: string, contents: string) => ({ path, payloadType: 'InlineBase64',
     payload: Buffer.from(contents).toString('base64') })

@@ -14,6 +14,11 @@ servidor consulta o perfil e usa exatamente a regra da página de dashboards em
 Trocar de relatório remonta o Chat e cancela a requisição em andamento. O Chat
 não lê slicers do iframe Publish to web: filtros devem estar na pergunta.
 
+Definições de tabelas que concentram painéis HTML também podem ser catalogadas:
+o leitor aceita partes até o limite de 5 MB aplicado à resposta completa do
+Fabric. O catálogo conserva os nomes dessas medidas e os campos analíticos;
+o conteúdo HTML e as conexões de origem não entram no contexto da IA.
+
 O Power BI é a fonte dos números. O Supabase guarda manifesto, mensagens e
 metadados de consultas; não replica fatos nem persiste linhas de resultados.
 
