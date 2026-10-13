@@ -12,6 +12,8 @@ import { answerFromReportReference } from './report-reference'
 import { ReportEvidenceError } from './report-evidence'
 import { biProgress, type BiProgressReporter } from './progress'
 import { escapeMarkdown } from './message-format'
+import { isGeneralJobLookup, jobCodeIn, resolveJobContext } from './entity-context'
+import { loadJobDetails } from './job-details'
 import { validateDax } from './dax-guard'
 import { certifiedPlan, certifiedScopeMessage, CertifiedQueryError } from './certified'
 import { publishedSchema } from './fabric-context'
@@ -136,6 +138,7 @@ export async function answerBiQuestion(input: {
   }
   await (input.audit?.takeRateLimit ?? takeRateLimit)(input.userId)
   const conversationId = await (input.audit?.resolveConversation ?? resolveConversation)(input.userId, input.dashboard.id, input.conversationId)
+  const history = await (input.audit?.previousTurns ?? previousTurns)(conversationId)
   let message = incomingMessage
   let clarificationCount = 0
   let clarifierKey: Buffer | null = null
@@ -161,25 +164,26 @@ export async function answerBiQuestion(input: {
       if (error instanceof ClarificationError) throw new BiAiError(400, 'INVALID_CLARIFICATION', error.message)
       throw error
     }
-    clarificationCount = pending.count
+    // An explicit entity starts its own topic, even if a previous question asked for a period/indicator.
+    clarificationCount = jobCodeIn(incomingMessage) ? 0 : pending.count
     const continued = continueClarification(pending, incomingMessage)
-    message = continued.question
-    if (continued.followUp) {
+    message = jobCodeIn(incomingMessage) ? incomingMessage : continued.question
+    if (continued.followUp && !jobCodeIn(message)) {
       if (clarificationCount >= 2) throw new BiAiError(400, 'CLARIFICATION_INCOMPLETE',
         'Ainda faltam informações para consultar com segurança. Refaça a pergunta com indicador e período.')
       return ask(continued.followUp, message, clarificationCount + 1)
     }
-  } else {
+  }
+  const entity = resolveJobContext(message, history)
+  message = entity.question
+  if (!entity.jobCode && (!input.clarificationToken || clarificationCount === 0)) {
     const prompt = basicClarification(message, input.manifest)
     if (prompt) return ask(prompt, message, 1)
   }
-  const [historyResult, schemaResult] = await Promise.allSettled([
-    (input.audit?.previousTurns ?? previousTurns)(conversationId),
+  const [schemaResult] = await Promise.allSettled([
     publishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId,
       Array.isArray(input.manifest.raw.reportReferences) && input.manifest.raw.reportReferences.length > 0),
   ])
-  if (historyResult.status === 'rejected') throw historyResult.reason
-  const history = historyResult.value
   let context = selectContext(input.manifest, message, input.isAdmin)
   const initialContext = context
   if (deepSeekThinkingModel(provider.id, config.modelo)) context = preloadPlannerContext(context, input.manifest)
@@ -202,9 +206,21 @@ export async function answerBiQuestion(input: {
         'Não consegui confirmar a definição atual do modelo publicado no Fabric. Tente novamente em instantes.')
     }
   }
+  if (entity.jobCode && isGeneralJobLookup(message)) {
+    const details = await loadJobDetails({ manifest: input.manifest, jobCode: entity.jobCode, question: message,
+      isAdmin: input.isAdmin, signal: input.signal, onProgress: input.onProgress,
+      onQuery: entry => recordQueryLog({ ...entry, userId: input.userId, dashboardId: input.dashboard.id,
+        semanticModelId: input.manifest.semanticModelId }) })
+    if (details) {
+      await saveTurn({ ...input, conversationId, message, answer: details.answer, queries: details.queries,
+        provider: 'powerbi-records', model: config.modelo, tokens: 0, started })
+      return { conversationId, answer: details.answer, queries: details.queries.map(({ purpose, rowCount }) => ({ purpose, rowCount })),
+        assumptions: [], truncated: details.truncated, entity: { kind: 'job', id: entity.jobCode } }
+    }
+  }
   let certified
   const normalizedMessage = normalizeTerm(message)
-  const rawDataQuestion = /\b(?:tabelas?|registros|lancamentos|movimentos|cnpj|cpf)\b/.test(normalizedMessage)
+  const rawDataQuestion = !!entity.jobCode || /\b(?:tabelas?|registros|lancamentos|movimentos|cnpj|cpf)\b/.test(normalizedMessage)
     || /\b(?:liste|listar|detalhamento|detalhe|detalhar|detalhes)\b/.test(normalizedMessage)
       && /\b(?:jobs?|clientes?)\b/.test(normalizedMessage)
   if (liveSchema && !rawDataQuestion && !metadataOnlyQuestion(message)) {

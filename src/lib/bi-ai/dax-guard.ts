@@ -80,7 +80,9 @@ export function validateDax(
   // Strings are labels and filter values; they cannot introduce model identifiers.
   let rest = compact.replace(/"(?:[^"]|"")*"/g, ' ')
   rest = rest.replace(/(?:'((?:[^']|'')+)'|([A-Za-z_][A-Za-z0-9_]*))\s*\[([^\]]+)\]/g,
-    (_full, quoted: string | undefined, plain: string | undefined, member: string) => {
+    (_full, quoted: string | undefined, plain: string | undefined, member: string, offset: number, text: string) => {
+      // ORDER BY [projected alias] is an output reference, not a table named BY.
+      if (!quoted && plain?.toUpperCase() === 'BY' && /\bORDER\s+$/i.test(text.slice(0, offset)) && aliases.has(member)) return `[${member}]`
       const tableName = (quoted ?? plain ?? '').replace(/''/g, "'")
       const table = manifest.tables.find((item) => item.name.toLowerCase() === tableName.toLowerCase())
       if (!table || !table.queryable || !context.tables.some((item) => item.name === table.name)) {

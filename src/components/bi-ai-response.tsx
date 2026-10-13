@@ -2,7 +2,7 @@
 
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { SOURCE_SECTION } from '@/lib/bi-ai/message-format'
+import { normalizeChatMarkdown, SOURCE_SECTION } from '@/lib/bi-ai/message-format'
 
 function MessageMarkdown({ text }: { text: string }) {
   return <Markdown remarkPlugins={[remarkGfm]} skipHtml
@@ -27,11 +27,23 @@ function MessageMarkdown({ text }: { text: string }) {
 }
 
 export function BiAiResponse({ answer }: { answer: string }) {
-  const split = answer.indexOf(SOURCE_SECTION)
-  const main = split < 0 ? answer : answer.slice(0, split).trim()
-  const source = split < 0 ? '' : answer.slice(split + SOURCE_SECTION.length).trim()
+  const formatted = normalizeChatMarkdown(answer)
+  const split = formatted.indexOf(SOURCE_SECTION)
+  const main = split < 0 ? formatted : formatted.slice(0, split).trim()
+  const source = split < 0 ? '' : formatted.slice(split + SOURCE_SECTION.length).trim()
+  const sections = main.split(/^### 📂 /m)
   return <div className="min-w-0 break-words text-sm text-foreground">
-    <MessageMarkdown text={main} />
+    <MessageMarkdown text={sections[0]} />
+    {sections.slice(1).map((section, index) => {
+      const newline = section.indexOf('\n')
+      const title = newline < 0 ? section : section.slice(0, newline)
+      const body = newline < 0 ? '' : section.slice(newline).trim()
+      const count = /^\*\*(\d+) registro\(s\) encontrado\(s\)\.\*\*/.exec(body)
+      return <details key={index} open={index === 0} className="my-4 rounded-lg border bg-background p-3">
+        <summary className="cursor-pointer select-none font-semibold text-gold-text">📂 {title}{count && <span className="ml-2 text-xs font-normal text-muted-foreground">· {count[1]} {count[1] === '1' ? 'registro' : 'registros'}</span>}</summary>
+        <div className="mt-3"><MessageMarkdown text={count ? body.slice(count[0].length).trim() : body} /></div>
+      </details>
+    })}
     {source && <details className="mt-5 border-t pt-3 text-muted-foreground">
       <summary className="cursor-pointer select-none text-xs font-medium hover:text-foreground">🧾 Ver fonte, filtros e cuidados com a leitura</summary>
       <div className="mt-3 text-xs"><MessageMarkdown text={source} /></div>
