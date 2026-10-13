@@ -54,7 +54,8 @@ function valueText(value: unknown, format?: string): string {
 
 export function formatJobDetails(jobCode: string, results: JobTableResult[]): string {
   const populated = results.filter(result => result.rows.length).sort((a, b) => Number(/cadastro/i.test(b.table)) - Number(/cadastro/i.test(a.table)))
-  if (!populated.length) return [`### 🧩 Job ${escapeMarkdown(jobCode)}`, 'Não encontrei registros desse job no modelo publicado.',
+  if (!populated.length) return ['Consultei o histórico disponível deste projeto para localizar os registros do job solicitado.',
+    `### Job ${escapeMarkdown(jobCode)}`, 'Não encontrei registros desse job no modelo publicado.',
     SOURCE_SECTION, `- **Filtro:** job igual a ${escapeMarkdown(jobCode)}.`,
     `- **Tabelas consultadas:** ${results.map(result => escapeMarkdown(result.table)).join(', ')}.`].join('\n\n')
   const blocks = populated.map(result => {
@@ -66,11 +67,12 @@ export function formatJobDetails(jobCode: string, results: JobTableResult[]): st
     const table = changing.length ? [`| ${changing.map(escapeMarkdown).join(' | ')} |`, `| ${changing.map(() => '---').join(' | ')} |`,
       ...result.rows.map(row => `| ${changing.map(column => escapeMarkdown(valueText(row[column], result.formats?.[column]))).join(' | ')} |`)].join('\n') : ''
     const title = result.table.replace(/^vw_powerbi_/i, '').replaceAll('_', ' ')
-    return [`### 📂 ${escapeMarkdown(title)}`, `**${result.rows.length} registro(s) encontrado(s).**`, fields, table,
+    return [`### Registros: ${escapeMarkdown(title)}`, `**${result.rows.length} registro(s) encontrado(s).**`, fields, table,
       ...(empty.length ? [`- **Campos sem valor no modelo:** ${empty.map(escapeMarkdown).join(', ')}.`] : []),
       ...(result.truncated ? ['> ⚠️ Esta tabela alcançou o limite de registros. Refine o pedido para consultar o restante.'] : [])].filter(Boolean).join('\n\n')
   })
-  return [`### 🧩 Job ${escapeMarkdown(jobCode)}`, `**📋 Registros exibidos:** ${populated.reduce((count, result) => count + result.rows.length, 0)} em ${populated.length} grupos.`,
+  return ['Reuni os registros do job no histórico disponível deste projeto. Os grupos abaixo mostram os dados de cada etapa; valores repetidos entre etapas não devem ser somados como receitas independentes.',
+    `### Job ${escapeMarkdown(jobCode)}`, `**Registros exibidos:** ${populated.reduce((count, result) => count + result.rows.length, 0)} em ${populated.length} grupos.`,
     '**Período:** todo o histórico disponível no modelo. Abra os grupos abaixo para ver os registros.',
     ...blocks, SOURCE_SECTION, `- **Filtro:** job igual a ${escapeMarkdown(jobCode)}.`, '- **Período:** todo o histórico disponível no modelo.',
     '- Valores de crédito e honorários podem se repetir entre etapas. Não foram somados como se fossem valores independentes.',

@@ -5,10 +5,11 @@ import { normalizeChatMarkdown } from '../src/lib/bi-ai/message-format'
 
 test('stored answer formatting removes empty bullets and wrappers while preserving literal code', () => {
   const answer = '### 📊 Valores conferidos\n\n- **Total aprovado:** R$ 123,45\n\n-\n\n-\n-\n-\n'
-  assert.equal(normalizeChatMarkdown(answer), '### 📊 Valores conferidos\n\n- **Total aprovado:** R$ 123,45')
+  assert.equal(normalizeChatMarkdown(answer), '### Valores conferidos\n\n- **Total aprovado:** R$ 123,45')
   assert.equal(normalizeChatMarkdown('```markdown\n' + answer.trim() + '\n```'), normalizeChatMarkdown(answer))
   assert.equal(normalizeChatMarkdown(answer.replaceAll('\n', '\\n')), normalizeChatMarkdown(answer))
   assert.equal(normalizeChatMarkdown('```sql\nSELECT 1\n-\n```'), '```sql\nSELECT 1\n-\n```')
+  assert.equal(normalizeChatMarkdown('```md\n### 📊 inside code\n```\n\n### 🧾 Fonte e filtros'), '```md\n### 📊 inside code\n```\n\n### Fonte e filtros')
 })
 
 test('the actual chat component renders headings, values and expandable job records safely', () => {
@@ -20,10 +21,10 @@ test('the actual chat component renders headings, values and expandable job reco
   const output = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], { encoding: 'utf8',
     env: { ...process.env, NODE_OPTIONS: '' } })
   assert.equal(output.status, 0, output.stderr)
-  assert.match(output.stdout, /<h3[^>]*>📊 Valores conferidos<\/h3>/)
+  assert.match(output.stdout, /<h3[^>]*>Valores conferidos<\/h3>/)
   assert.match(output.stdout, /<strong[^>]*>Total aprovado:<\/strong>/)
   assert.match(output.stdout, /<details[^>]*open=""/)
-  assert.match(output.stdout, /<summary[^>]*>📂 Cadastro Jobs<\/summary>/)
+  assert.match(output.stdout, /<summary[^>]*>Cadastro Jobs<\/summary>/)
   assert.match(output.stdout, /<table/)
   assert.match(output.stdout, /Ver fonte, filtros/)
   assert(!output.stdout.includes('###') && !output.stdout.includes('<script') && !/<li[^>]*>\s*<\/li>/.test(output.stdout))

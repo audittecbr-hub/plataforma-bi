@@ -59,6 +59,9 @@ test('live visual rules expose pure DAX variables with exact dependencies, witho
   const query = prepareSemanticQuery({ dax: 'EVALUATE ROW("Total", SUMX(_records, [Value]))', sourceMeasure: 'Visual', maxRows: 1, context, manifest })
   assert(query.dax.startsWith('DEFINE\nVAR _initial = DATE(2026, 1, 1)\nVAR _records = SELECTCOLUMNS'))
   assert(!query.dax.includes('_prepared') && !query.dax.includes('<script'))
+  assert.equal(prepareSemanticQuery({ dax: 'EVALUATE ROW("Total", SUMX(_records, [Value]))', maxRows: 1, context, manifest }).sourceMeasure, 'Visual')
+  assert.throws(() => prepareSemanticQuery({ dax: 'EVALUATE ROW("Total", SUMX(_records, [Value]))', maxRows: 1,
+    context: { ...context, semanticSources: [...context.semanticSources!, { ...context.semanticSources![0], measure: 'Ambiguous visual' }] }, manifest }))
   assert.throws(() => prepareSemanticQuery({ dax: 'EVALUATE ROW("Total", _invented)', sourceMeasure: 'Visual', maxRows: 1, context, manifest }))
   assert.throws(() => prepareSemanticQuery({ dax: 'EVALUATE ROW("Total", SUMX(_records, [Value]))', sourceMeasure: 'Other model', maxRows: 1, context, manifest }))
 })
@@ -66,6 +69,11 @@ test('live visual rules expose pure DAX variables with exact dependencies, witho
 test('read expressions retain filters and sorting, and all fields survive the answer transport', () => {
   const query = boundedReadQuery('EVALUATE SUMMARIZECOLUMNS(Events[Job], "Total", [Total]) ORDER BY [Total] DESC', 25)
   assert(query.includes('TOPN(25, (SUMMARIZECOLUMNS') && query.includes(', [Total], DESC) ORDER BY [Total] DESC'))
+  const defaultOrder = boundedReadQuery('EVALUATE SUMMARIZECOLUMNS(Events[Job], "Total", [Total]) ORDER BY Events[Job], [Total] DESC', 25)
+  assert(defaultOrder.includes(', Events[Job], ASC, [Total], DESC) ORDER BY Events[Job], [Total] DESC'))
+  const expressionOrder = boundedReadQuery('EVALUATE ROW("Total", [Total]) ORDER BY DIVIDE([Total], 2), [Total]', 10)
+  // ROW is a single result and needs no bounding/sort transformation.
+  assert(expressionOrder.startsWith('EVALUATE ROW'))
   const plan = parsePlan(JSON.stringify({ answerable: true, queries: [{ dax: query, maxRows: 25 }] }), context, manifest, 'Qual maior job?')
   assert.equal(plan.queries.length, 1)
   assert.deepEqual(parsePlan(JSON.stringify({ action: 'search-catalog', terms: ['amount'] }), context, manifest, 'Qual valor?').catalogSearch, ['amount'])
@@ -89,6 +97,7 @@ test('a new analytical question explores real rows and then executes the publish
   let calls = 0, reads = 0, savedAnswer = '', refreshVersion = 'v1', changeDuring = false, rawMode = false, reviews = 0
   let sourceReviews = 0
   let modelChanged = false, changeModelDuring = false
+  let metadataMode = false, explanations = 0
   try {
     globalThis.fetch = async (input, init) => {
       const url = String(input)
@@ -101,29 +110,35 @@ test('a new analytical question explores real rows and then executes the publish
       if (url.endsWith('/chat/completions')) {
         const body = JSON.parse(String(init?.body))
         assert.equal(body.reasoning_effort, 'max')
+        if (body.messages[0].content.startsWith('Explique em português')) {
+          explanations++
+          return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({
+            answer: 'Este indicador é expresso em reais (R$), não em quantidade. Ele acompanha o valor apurado no relatório.' }) } }] })
+        }
         if (body.messages[0].content.startsWith('Revise o plano')) {
           const reviewInput = JSON.parse(body.messages[1].content)
           if (!rawMode) {
             sourceReviews++
             assert(reviewInput.publishedRules.some((source: { measure: string }) => source.measure === 'Visual'))
             assert.equal(reviewInput.context, undefined)
-            return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(reviewInput.plan) } }] })
+            return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: '{"approved":true}' } }] })
           }
           reviews++
           assert(reviewInput.plan.queries[0].dax.includes('SUM(Events[Amount])'))
           assert(reviewInput.publishedRules.some((source: { measure: string }) => source.measure === 'Visual'))
-          return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ answerable: true,
+          return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ approved: false,
+            issues: [{ queryIndex: 0, reason: 'A soma bruta não aplica os filtros e arredondamentos do visual.' }],
             queries: [{ purpose: 'Valor com os filtros e arredondamentos publicados', sourceMeasure: 'Visual',
               dax: 'EVALUATE TOPN(1, _records, [Value], DESC)', maxRows: 1 }], assumptions: [] }) } }] })
         }
         const prompt = JSON.parse(body.messages[2].content)
         assert(body.messages[0].content.includes('Não depende de lista de perguntas'))
         calls++
-        const content = rawMode ? { answerable: true, queries: [{ purpose: 'Valor sem regra publicada', dax: 'EVALUATE ROW("Total", SUM(Events[Amount]))', maxRows: 1 }] }
+        const content = metadataMode ? { action: 'model-info' } : rawMode ? { answerable: true, queries: [{ purpose: 'Valor sem regra publicada', dax: 'EVALUATE ROW("Total", SUM(Events[Amount]))', maxRows: 1 }] }
           : calls % 2 === 1 ? { action: 'explore', queries: [{ purpose: 'Descobrir categorias', dax: 'EVALUATE VALUES(Events[Job])', maxRows: 20 }] }
           : { answerable: true, queries: [{ purpose: 'Maior job pelo valor da regra publicada', sourceMeasure: 'Visual',
             dax: 'EVALUATE TOPN(1, _records, [Value], DESC) ORDER BY [Value] DESC', maxRows: 5 }], assumptions: ['Período: outubro de 2026.'] }
-        if (!rawMode && calls % 2 === 0) assert.equal(prompt.exploration[0].rows[0]['Events[Job]'], '12345-FTX')
+        if (!metadataMode && !rawMode && calls % 2 === 0) assert.equal(prompt.exploration[0].rows[0]['Events[Job]'], '12345-FTX')
         return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(content) } }], usage: { total_tokens: 10 } })
       }
       if (url.endsWith('/executeQueries')) {
@@ -139,9 +154,9 @@ test('a new analytical question explores real rows and then executes the publish
       }
       throw new Error(`Unexpected request: ${url}`)
     }
-    const work = () => withAiRequestCache(() => answerBiQuestion({ manifest, userId: '55555555-5555-4555-8555-555555555555', isAdmin: false,
+    const work = (message = 'Qual maior job em outubro de 2026?') => withAiRequestCache(() => answerBiQuestion({ manifest, userId: '55555555-5555-4555-8555-555555555555', isAdmin: false,
       dashboard: { id: '44444444-4444-4444-8444-444444444444', name: 'Novo projeto', department: 'Diretoria', allowed_departments: [], assigned_user_id: null, sub_group: null },
-      conversationId: null, message: 'Qual maior job em outubro de 2026?', audit: {
+      conversationId: null, message, audit: {
         configuration: { provedorId: 'opencode-go', modelo: 'deepseek-v4.1-flash', enabled: true, reasoningEffort: 'max', fonte: 'banco' },
         takeRateLimit: async () => {}, resolveConversation: async () => '66666666-6666-4666-8666-666666666666', previousTurns: async () => [],
         recordTurn: async turn => { savedAnswer = turn.answer }, recordQueryLog: async () => {},
@@ -164,6 +179,10 @@ test('a new analytical question explores real rows and then executes the publish
     savedAnswer = ''; changeModelDuring = true
     await assert.rejects(work(), /definição do modelo ou relatório mudou/)
     assert.equal(savedAnswer, '')
+    changeModelDuring = false; modelChanged = false; metadataMode = true
+    const definition = await work('O que significa este indicador?')
+    assert('answer' in definition && definition.answer?.startsWith('Este indicador é expresso em reais (R$)'))
+    assert.equal(explanations, 1)
   } finally {
     globalThis.fetch = originalFetch
     for (const name of Object.keys(env)) { if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name] }

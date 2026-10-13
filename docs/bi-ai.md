@@ -43,6 +43,44 @@ O modelo DeepSeek V4.1 Flash, o teto máximo de saída e a checagem dos números
 são preservados. O nível High foi autorizado para reduzir a espera. O tempo da inferência ainda varia conforme
 a pergunta, o raciocínio necessário e a disponibilidade do provedor.
 
+### Apresentação compartilhada
+
+Todos os projetos usam o mesmo renderer e o mesmo contrato de resposta. Antes
+dos valores, o servidor apresenta um parágrafo que explica o indicador e o
+recorte. O planejador pode fornecer essa explicação junto do plano, sem uma
+chamada extra; números continuam vindo exclusivamente das linhas do Power BI.
+Moedas e percentuais têm formato explícito por campo. Percentuais distinguem
+frações (`ratio`) de valores já multiplicados por cem (`points`), evitando
+exibir `0,04` como se fosse a apresentação final de uma porcentagem.
+
+Títulos e tópicos não recebem emojis decorativos; avisos reais podem manter
+o símbolo de atenção. Históricos antigos continuam legíveis. O painel fixa
+suas colunas com `minmax(0, 1fr)`, permite quebra de frases e mantém a rolagem
+horizontal dentro das tabelas e blocos de código. Títulos não são cortados com
+reticências. Esses comportamentos também se aplicam a novos projetos.
+
+Fontes escalares pequenas expõem desde o primeiro plano a fórmula publicada
+e suas medidas de entrada. A revisão prioriza a fonte declarada, conserva a
+definição completa pertinente e sinaliza dependências de tabelas inexistentes;
+uma medida auxiliar de nome semelhante não redefine o cálculo do visual.
+Em respostas escalares com `ROW`, cálculos idênticos são reutilizados quando
+estão no mesmo contexto. Se o Power BI recusar a leitura por memória, o
+servidor divide a linha em leituras menores com as mesmas expressões, sem
+pedir outro plano à IA. Nenhuma resposta parcial é entregue; cada leitura
+permanece auditada e a publicação/atualização são reconferidas no final.
+A revisão aprova o plano original ou corrige consultas cujo problema foi
+identificado; não regenera a análise nem acrescenta novas consultas.
+Comparações e projeções podem usar `result-query`: o servidor materializa
+temporariamente resultados completos desta mesma análise, e o Power BI
+executa a aritmética sobre eles. As linhas vêm somente das consultas reais,
+vinculadas ao checkpoint cifrado do usuário e projeto. Essa composição evita
+reexecutar medidas complexas para períodos já lidos. Linhas truncadas, fontes
+ausentes e redefinição das tabelas temporárias são recusadas; uma agregação
+não aditiva precisa ser consultada na fonte antes da composição. Os logs
+persistem a estrutura/proveniência da consulta, sem duplicar esses valores.
+Projeções devem informar o método, separar estimativa de realizado e tratar
+o mês incompleto. Uma diferença para a meta, isoladamente, não é previsão.
+
 Quando a pergunta deixa indicador ou período em aberto, o Chat pede um
 esclarecimento antes de executar DAX. A resposta pode ser escolhida em opções
 curtas ou escrita livremente. O servidor combina o esclarecimento com a pergunta

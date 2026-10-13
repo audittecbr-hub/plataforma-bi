@@ -126,7 +126,7 @@ test('published evidence ignores invented output; new filters and changed report
         recordTurn: async () => {}, recordQueryLog: async () => {} } }))
     assert('evidence' in selectedByModel && selectedByModel.evidence)
     assert.deepEqual(selectedByModel.evidence.values.map(fact => fact.value), [321, 42])
-    assert('answer' in selectedByModel && selectedByModel.answer?.includes('### 📂 Card'))
+    assert('answer' in selectedByModel && selectedByModel.answer?.includes('### Card'))
     assert.equal(reads, 10)
   } finally {
     globalThis.fetch = originalFetch

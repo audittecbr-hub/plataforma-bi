@@ -47,7 +47,8 @@ test('structured answers preserve verified values, separate sources and keep ref
   const output = formatVerifiedAnswer({ facts: [{ id: 'f0', metricId: 'income', label: 'Receita [TAX]', value: 123.45,
     format: 'currency', precision: 0.005, scope: '2026-10 · TAX' }], insights: [], pages: ['HOME'], notes: ['Mesma fonte publicada.'], refreshFailed: true })
   assert(output.includes('- **Receita \\[TAX\\]:** R$\u00a0123,45'))
-  assert(output.indexOf('⚠️') < output.indexOf('### 🧾 Fonte e filtros'))
+  assert(output.indexOf('⚠️') < output.indexOf('### Fonte e filtros'))
+  assert(output.startsWith('Consultei Receita'))
   assert(output.includes('\n\n'))
   assert(output.includes('2026-10 · TAX'))
 })

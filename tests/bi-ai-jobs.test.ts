@@ -131,7 +131,7 @@ test('job dossiers read every eligible table, preserve source values and reject 
     assert.equal(saves, beforeFailure)
     refreshStatus = 'Failed'
     const stale = await detail()
-    assert(stale!.answer.indexOf('⚠️') < stale!.answer.indexOf('### 📂'))
+    assert(stale!.answer.indexOf('⚠️') < stale!.answer.indexOf('### Registros:'))
   } finally {
     globalThis.fetch = originalFetch
     for (const name of Object.keys(env)) {

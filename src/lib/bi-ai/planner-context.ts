@@ -1,5 +1,5 @@
 import { normalizeTerm, selectContext, type SelectedContext } from './context'
-import { resolveSourceVariables, usesPublishedDataRule, sourceTableFields, type DaxSemanticSource } from './dax-source'
+import { daxObjectReferences, resolveSourceVariables, usesPublishedDataRule, sourceTableFields, type DaxSemanticSource } from './dax-source'
 import type { BiManifest } from './manifest'
 import type { ReportReferenceContract } from './report-evidence'
 import { publishedAggregations } from './source-analysis'
@@ -45,6 +45,7 @@ export function focusedPlannerContext(context: SelectedContext, manifest: BiMani
   const focused = sources.filter(source => requested.has(normalizeTerm(`${source.measure}::catalog`)) || requested.has(normalizeTerm(`${source.measure}::auto`)))
   const dataSources = sources.filter(source => usesPublishedDataRule(source.variables) || expanded(source.table, source.measure) || focused.includes(source))
   const ordered = [...focused, ...rankSemanticSources(dataSources, question, references).filter(source => !focused.includes(source))]
+  const scalarInputs = new Set<string>()
   const semanticSources = ordered.map((source, sourceIndex) => {
     const fields = sourceTableFields(source)
     const full = requested.has(normalizeTerm(source.measure))
@@ -52,6 +53,11 @@ export function focusedPlannerContext(context: SelectedContext, manifest: BiMani
     const requestedVariables = source.variables.filter(variable => requested.has(normalizeTerm(`${source.measure}::${variable.name}`)))
     const included = new Set((full ? source.variables : resolveSourceVariables(source, requestedVariables.map(variable => variable.name).join(' ')))
       .map(variable => variable.name))
+    // A small scalar visual is already its complete data rule. Keep its actual
+    // measure inputs visible instead of forcing an inspection or choosing an auxiliary homonym.
+    const smallScalar = focused.includes(source) && source.variables.reduce((size, variable) => size + variable.expression.length, 0) <= sourceBudget
+      && source.variables.every(variable => !fields.get(variable.name))
+    if (smallScalar) source.variables.forEach(variable => included.add(variable.name))
     let bytes = source.variables.filter(variable => included.has(variable.name)).reduce((total, variable) => total + variable.expression.length, 0)
     if (!full && sourceIndex === 0 && focused.length) {
       const ranked = source.variables.map((variable, index) => ({ variable, index, score: relevance(variable.expression, words) }))
@@ -70,6 +76,9 @@ export function focusedPlannerContext(context: SelectedContext, manifest: BiMani
       }
     }
     const variables = source.variables.filter(variable => included.has(variable.name)).map(({ name, expression }) => ({ name, expression, fields: fields.get(name) }))
+    if (smallScalar || full) variables.forEach(variable => daxObjectReferences(variable.expression)
+      .filter(reference => visibleMeasures.some(measure => measure.name === reference.name && (!reference.table || measure.table === reference.table)))
+      .forEach(reference => scalarInputs.add(reference.name)))
     if (variables.length || focused.includes(source) || full) return { measure: source.measure, table: source.table, description,
       variables, availableVariables: source.variables.map(variable => variable.name),
       sourceAggregations: publishedAggregations(source).filter(aggregate => full
@@ -88,23 +97,29 @@ export function focusedPlannerContext(context: SelectedContext, manifest: BiMani
       columns: table.columns.filter(column => column.queryable && !column.presentationOnly && (!column.restricted || context.allowRestricted))
         .filter(column => expanded(undefined, table.name) || expanded(table.name, column.name) || selectedColumns.has(`${table.name}[${column.name}]`))
         .map(column => [column.name, column.dataType]) })),
-    availableMeasures: dataSources.length ? chosen.filter(measure => expanded(measure.table, measure.name)).map(measure => measure.name) : context.availableMeasures,
+    availableMeasures: dataSources.length ? visibleMeasures.filter(measure => scalarInputs.has(measure.name) || expanded(measure.table, measure.name)).map(measure => measure.name) : context.availableMeasures,
     inspectRemainingCatalog: 'search-catalog e inspect cobrem todas as tabelas, colunas e medidas do projeto.',
-    measures: chosen.filter(measure => !dataSources.length || expanded(measure.table, measure.name)).map(measure => ({ name: measure.name, table: measure.table,
+    measures: visibleMeasures.filter(measure => scalarInputs.has(measure.name) || chosen.includes(measure) && (!dataSources.length || expanded(measure.table, measure.name))).map(measure => ({ name: measure.name, table: measure.table,
       description: measure.description.slice(0, expanded(measure.table, measure.name) ? undefined : sources.length ? 160 : 700),
-      expression: expanded(measure.table, measure.name) || !sources.length && (measure.publishedExpression?.length ?? Infinity) <= 2000
+      expression: scalarInputs.has(measure.name) || expanded(measure.table, measure.name) || !sources.length && (measure.publishedExpression?.length ?? Infinity) <= 2000
         ? measure.publishedExpression : undefined, format: measure.format,
       whenToUse: !sources.length || expanded(measure.table, measure.name) ? measure.whenToUse || undefined : undefined,
       whenNotToUse: !sources.length || expanded(measure.table, measure.name) ? measure.whenNotToUse || undefined : undefined })),
-    relationships: context.relationships, reportMap: context.reportMap,
+    relationships: context.relationships,
+    // Data plans need the selected visual's rules, not every field of every page.
+    // model-info still receives the complete live reportMap when explaining the report.
+    reportMap: context.pages.map(page => ({ page, focusedSources: references.filter(reference => reference.page === page
+      && focused.some(source => source.measure === reference.measure)).map(reference => reference.measure) })),
     semanticSources,
     policy: { ...context.policy, maxRows: 100_000, maxQueries: 100 },
   }
 }
 
 /** The tool needs names, filters and metric IDs, not HTML parser internals. */
-export function plannerReportReferences(references: ReportReferenceContract[]) {
-  return references.map(({ measure, page, metrics, notes, source }) => ({ measure, page, notes,
+export function plannerReportReferences(references: ReportReferenceContract[], focused?: string[]) {
+  return references.map(({ measure, page, metrics, notes, source }) => focused && !focused.includes(measure)
+    ? { measure, page, inspectForRules: true, metrics: metrics.map(({ id, label, format }) => ({ id, label, format })) }
+    : ({ measure, page, notes,
     scope: { timeField: source.timeField, groupField: source.groupField, regionLabels: source.regionLabels },
     fields: source.fields,
     metrics: metrics.map(({ id, label, aliases, format, expression }) => ({ id, label, aliases, format, expression })) }))

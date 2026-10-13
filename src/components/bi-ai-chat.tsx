@@ -151,12 +151,12 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
       <Button type="button" variant="subtle" size="sm" onClick={() => setOpen(true)}>
         <MessageSquareText className="size-4" /> Perguntar à IA
       </Button>
-      <DialogContent className="!left-auto !right-0 !top-0 !h-dvh !w-full !max-w-none !translate-x-0 !translate-y-0 !gap-0 !rounded-none !p-0 sm:!max-w-[440px] sm:!rounded-l-xl" showCloseButton={false}>
-        <div className="flex h-full min-h-0 flex-col">
+      <DialogContent className="!left-auto !right-0 !top-0 !h-dvh !w-full !max-w-none !translate-x-0 !translate-y-0 !gap-0 !rounded-none !p-0 grid-cols-[minmax(0,1fr)] overflow-hidden sm:!max-w-[440px] sm:!rounded-l-xl" showCloseButton={false}>
+        <div className="flex h-full min-h-0 min-w-0 max-w-full flex-col">
           <DialogHeader className="flex-row items-start justify-between gap-3 border-b px-5 py-4">
             <div className="min-w-0">
               <DialogTitle className="flex items-center gap-2 text-base"><Bot className="size-4 text-gold-text" /> Perguntar à IA</DialogTitle>
-              <DialogDescription className="truncate">Contexto: {dashboardName}</DialogDescription>
+              <DialogDescription className="break-words [overflow-wrap:anywhere]">Contexto: {dashboardName}</DialogDescription>
             </div>
             <div className="flex shrink-0 gap-1">
               <Button type="button" variant="ghost" size="icon-sm" aria-label="Histórico" onClick={() => setShowHistory((old) => !old)}><History /></Button>
@@ -164,7 +164,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
               <Button type="button" variant="ghost" size="icon-sm" aria-label="Fechar chat" onClick={() => setOpen(false)}><X /></Button>
             </div>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-4">
             {showHistory ? (
               <div className="space-y-2">
                 <p className="eyebrow text-[10px] text-faint">Conversas deste relatório</p>
@@ -177,7 +177,7 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
                 ))}
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className="min-w-0 max-w-full space-y-4">
                 {!context && !contextError && <p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" /> Carregando contexto…</p>}
                 {(contextError || (context && !context.enabled)) && (
                   <div className="rounded-[8px] border bg-surface p-3 text-sm text-muted-foreground">
@@ -196,14 +196,14 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
                   </div>
                 )}
                 {messages.map((item) => (
-                  <div key={item.id} className="space-y-4">
-                    <div className="ml-auto max-w-[90%] rounded-[8px] bg-gold-wash px-3 py-2 text-sm text-foreground">{item.question}</div>
-                    {item.answer && <div className="rounded-xl border bg-surface px-4 py-4">
+                  <div key={item.id} className="min-w-0 max-w-full space-y-4">
+                    <div className="ml-auto max-w-[90%] whitespace-pre-wrap rounded-[8px] bg-gold-wash px-3 py-2 text-sm text-foreground [overflow-wrap:anywhere]">{item.question}</div>
+                    {item.answer && <div className="min-w-0 max-w-full rounded-xl border bg-surface px-4 py-4">
                       <BiAiResponse answer={item.answer} />
                       {!!item.queries?.length && <p className="mt-2 border-t pt-2 text-xs text-muted-foreground">{item.queries.length} consulta(s) ao Power BI</p>}
                       {item.clarification && <div className="mt-3 flex flex-wrap gap-2" aria-label="Opções de esclarecimento">
                         {item.clarification.options.map((option) => <Button key={option} type="button"
-                          variant="secondary" size="sm" onClick={() => send(option)}
+                          variant="secondary" size="sm" className="h-auto max-w-full whitespace-normal py-2 text-left [overflow-wrap:anywhere]" onClick={() => send(option)}
                           disabled={pending || pendingClarification?.token !== item.clarification?.token}>{option}</Button>)}
                         <p className="w-full text-xs text-muted-foreground">Você também pode responder com suas próprias palavras abaixo.</p>
                       </div>}
@@ -216,13 +216,13 @@ export function BiAiChat({ dashboardId, dashboardName }: { dashboardId: string; 
               </div>
             )}
           </div>
-          <div className="border-t p-4">
-            <div className="flex items-end gap-2">
+          <div className="min-w-0 border-t p-4">
+            <div className="flex min-w-0 items-end gap-2">
               <Textarea value={message} onChange={(event) => setMessage(event.target.value)} rows={2} maxLength={8000}
                 placeholder={pendingClarification ? 'Responda ao esclarecimento acima…' : 'Pergunte sobre este relatório…'}
                 disabled={!context?.enabled || pending}
                 onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send(message) } }}
-                className="max-h-28 resize-none" />
+                className="min-w-0 max-h-28 resize-none" />
               {pending ? (
                 <Button type="button" variant="secondary" size="icon" aria-label="Cancelar" onClick={() => activeRequest.current?.abort()}><Square /></Button>
               ) : (

@@ -2,6 +2,19 @@
 export interface DaxSourceVariable { name: string; expression: string; dependencies: string[]; aliases: string[] }
 export interface DaxSemanticSource { measure: string; table: string; description: string; variables: DaxSourceVariable[] }
 
+/** Object references outside strings/comments, including escaped DAX identifiers. */
+export function daxObjectReferences(expression: string): { table?: string; name: string }[] {
+  const result: { table?: string; name: string }[] = []
+  const tokens = /"(?:[^"]|"")*"|\/\*[\s\S]*?\*\/|\/\/[^\n]*|--[^\n]*|(?:'((?:[^']|'')+)'|([A-Za-z_][A-Za-z0-9_]*))\s*\[((?:[^\]]|\]\])+)\]|\[((?:[^\]]|\]\])+)\]/g
+  for (const match of expression.matchAll(tokens)) {
+    const name = match[3] ?? match[4]
+    if (!name) continue
+    const table = (match[1]?.replaceAll("''", "'") ?? match[2])
+    result.push({ ...(table && !/^(?:BY|RETURN|EVALUATE)$/i.test(table) ? { table } : {}), name: name.replaceAll(']]', ']') })
+  }
+  return result
+}
+
 /** Keep offsets while hiding comments, strings and quoted identifiers from structural parsing. */
 export function maskDax(value: string): string {
   const chars = value.split('')
@@ -79,6 +92,7 @@ export function resolveSourceVariables(source: DaxSemanticSource, query: string)
 /** Calendar/scalar helpers alone do not authenticate an independently rebuilt metric. */
 export function usesPublishedDataRule(variables: DaxSourceVariable[]) {
   return variables.some(variable => /\b(?:FILTER|SELECTCOLUMNS|ADDCOLUMNS|SUMMARIZECOLUMNS|GROUPBY|NATURALINNERJOIN|NATURALLEFTOUTERJOIN|UNION|SUMX|AVERAGEX|COUNTROWS|SUM)\s*\(/i.test(maskDax(variable.expression)))
+    || variables.some(variable => daxObjectReferences(variable.expression).some(reference => !reference.table))
 }
 
 /** Correct a source label only when the complete variable set identifies one live source. */

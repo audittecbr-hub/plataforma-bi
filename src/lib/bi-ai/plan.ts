@@ -6,12 +6,14 @@ import { normalizeTerm } from './context'
 import type { ReportScope } from './report-evidence'
 import { reconcileVariableSource } from './dax-source'
 import { compileSourceAnalysis } from './source-analysis'
+import type { VerifiedResult } from './result-query'
 
 export interface PlannedQuery {
   purpose: string
   dax: string
   maxRows: number
   sourceMeasure?: string
+  formats?: Record<string, { type: 'number' | 'currency' | 'percent'; percentScale?: 'ratio' | 'points'; decimals?: number }>
 }
 
 export interface QueryPlan {
@@ -21,6 +23,7 @@ export interface QueryPlan {
   objectsUsed: string[]
   queries: PlannedQuery[]
   assumptions: string[]
+  explanation?: string
   clarification?: ClarificationPrompt
   inspect?: string[]
   catalogSearch?: string[]
@@ -49,6 +52,27 @@ function parseObject(text: string): Record<string, unknown> {
   }
 }
 
+function queryFormats(value: unknown): PlannedQuery['formats'] {
+  const formats: NonNullable<PlannedQuery['formats']> = {}
+  for (const [field, definition] of Object.entries(asRecord(value)).slice(0, 100)) {
+    const provided = asRecord(definition), format: Record<string, unknown> = { ...provided, type: provided.type === 'decimal' ? 'number' : provided.type }
+    if (!['number', 'currency', 'percent'].includes(String(format.type))
+      || format.type === 'percent' && !['ratio', 'points'].includes(String(format.percentScale))
+      || format.decimals !== undefined && (!Number.isInteger(format.decimals) || Number(format.decimals) < 0 || Number(format.decimals) > 10)) {
+      throw new Error('Formato numérico inválido. Percentuais precisam declarar percentScale ratio ou points.')
+    }
+    formats[field] = { type: format.type as 'number' | 'currency' | 'percent',
+      ...(format.type === 'percent' ? { percentScale: format.percentScale as 'ratio' | 'points' } : {}),
+      ...(typeof format.decimals === 'number' ? { decimals: format.decimals } : {}) }
+  }
+  return Object.keys(formats).length ? formats : undefined
+}
+
+function explanationText(value: unknown): string | undefined {
+  // Do not cut a sentence in the middle when a provider ignores the short-paragraph instruction.
+  return typeof value === 'string' && value.length <= 8000 ? safeText(value, 8000) || undefined : undefined
+}
+
 /** A data answer needs Power BI rows; only model/report explanations may omit DAX. */
 export function metadataOnlyQuestion(question: string): boolean {
   const text = normalizeTerm(question)
@@ -56,12 +80,13 @@ export function metadataOnlyQuestion(question: string): boolean {
   return /^(?:o que (?:e|significa|tem|mostra)|como (?:funciona|e calculad[oa])|qual (?:e |a |o )?(?:regra|definicao|formula|pagina|medida)|quais (?:sao )?(?:as |os )?(?:paginas|indicadores|filtros|medidas)|onde (?:fica|encontro|esta)|esse numero (?:considera|inclui|exclui))\b/.test(text)
 }
 
-export function parsePlan(text: string, context: SelectedContext, manifest: BiManifest, question: string): QueryPlan {
+export function parsePlan(text: string, context: SelectedContext, manifest: BiManifest, question: string, results?: VerifiedResult[]): QueryPlan {
   const raw = parseObject(text)
   if (raw.action === 'source-analysis') {
-    const query = compileSourceAnalysis(raw, context.semanticSources ?? [])
+    const query = { ...compileSourceAnalysis(raw, context.semanticSources ?? []), formats: queryFormats(raw.formats) }
     prepareSemanticQuery({ ...query, context, manifest })
     return { answerable: true, intent: 'Cruzamento com fórmulas publicadas', reason: '', objectsUsed: [], queries: [query],
+      explanation: explanationText(raw.explanation),
       assumptions: Array.isArray(raw.assumptions) ? raw.assumptions.map(note => safeText(note, 4000)).filter(Boolean).slice(0, 30) : [] }
   }
   if (raw.action === 'focus-source') {
@@ -111,7 +136,8 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
         ...(typeof order.field === 'string' ? { sort: { field: order.field, descending: order.descending !== false } } : {}),
         ...(Array.isArray(item.fields) ? { fields: item.fields as string[] } : {}) }
     })
-    return { answerable: true, intent: 'Responder com dados já consultados', reason: '', objectsUsed: [], queries: [], assumptions: [], answerResults }
+    return { answerable: true, intent: 'Responder com dados já consultados', reason: '', objectsUsed: [], queries: [], assumptions: [], answerResults,
+      explanation: explanationText(raw.explanation) }
   }
   if (raw.action === 'report-facts') {
     if (!Array.isArray(raw.requests) || !raw.requests.length || raw.requests.length > 30) throw new Error('Informe as fontes dos indicadores solicitados.')
@@ -137,6 +163,7 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
       objectsUsed: [], queries: [], assumptions: [], inspect }
   }
   if (raw.action === 'explore') raw.answerable = true
+  if (raw.action === 'result-query') raw.answerable = true
   if (typeof raw.answerable !== 'boolean') throw new Error('Plano sem answerable.')
   const queryLimit = 100
   // The model can ask for more detail than the old prompt default; Power BI caps one result at 100k rows.
@@ -172,8 +199,12 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
     const requested = Number.isInteger(row.maxRows) ? row.maxRows as number : manifest.policy.maxRows
     const maxRows = Math.min(Math.max(requested, 1), rowLimit)
     const sourceMeasure = typeof row.sourceMeasure === 'string' ? row.sourceMeasure.trim() : undefined
-    const prepared = prepareSemanticQuery({ dax, maxRows, sourceMeasure, context, manifest })
-    return { purpose: safeText(row.purpose, 1000) || 'Consulta', dax: prepared.body, maxRows, ...(sourceMeasure ? { sourceMeasure } : {}) }
+    const prepared = prepareSemanticQuery({ dax, maxRows, sourceMeasure, context, manifest, results })
+    if (raw.action === 'result-query' && !prepared.resultNames.length) throw new Error('A composição precisa usar resultados já conferidos nesta análise.')
+    const formats = queryFormats(row.formats)
+    const resolvedSource = prepared.sourceMeasure ?? sourceMeasure
+    return { purpose: safeText(row.purpose, 1000) || 'Consulta', dax: prepared.body, maxRows, ...(resolvedSource ? { sourceMeasure: resolvedSource } : {}),
+      ...(formats ? { formats } : {}) }
   })
   if (!queries.length && !metadataOnlyQuestion(question)) {
     throw new Error('Uma resposta sobre dados precisa consultar o modelo Power BI com DAX.')
@@ -184,10 +215,39 @@ export function parsePlan(text: string, context: SelectedContext, manifest: BiMa
     reason: safeText(raw.reason, 300),
     objectsUsed,
     queries,
+    explanation: explanationText(raw.explanation),
     ...(raw.action === 'explore' ? { exploratory: true } : {}),
     assumptions: Array.isArray(raw.assumptions)
       ? raw.assumptions.map((item) => safeText(item, 4000)).filter(Boolean).slice(0, 30) : [],
   }
+}
+
+/** An independent reviewer approves a concrete plan or corrects identified queries; it cannot invent another analysis. */
+export function parseReviewedPlan(text: string, original: QueryPlan, context: SelectedContext, manifest: BiManifest, question: string, results?: VerifiedResult[]): QueryPlan {
+  const raw = parseObject(text)
+  if (raw.approved === true) {
+    if (raw.queries !== undefined || raw.assumptions !== undefined || raw.explanation !== undefined) throw new Error('A aprovação deve preservar o plano original.')
+    return { ...original, reviewed: true }
+  }
+  if (raw.approved !== false || !Array.isArray(raw.issues) || !raw.issues.length) throw new Error('A revisão deve aprovar ou identificar os problemas das consultas.')
+  const indexes = new Set<number>()
+  for (const issue of raw.issues) {
+    const row = asRecord(issue)
+    if (!Number.isInteger(row.queryIndex) || Number(row.queryIndex) < 0 || Number(row.queryIndex) >= original.queries.length || !safeText(row.reason, 2000)) {
+      throw new Error('A revisão precisa identificar a consulta e o problema encontrados.')
+    }
+    indexes.add(Number(row.queryIndex))
+  }
+  const corrected = parsePlan(JSON.stringify({ ...raw, answerable: true, explanation: raw.explanation ?? original.explanation,
+    assumptions: raw.assumptions ?? original.assumptions }), context, manifest, question, results)
+  if (!corrected.answerable || corrected.queries.length !== original.queries.length || corrected.exploratory || corrected.reportRequests || corrected.inspect) {
+    throw new Error('A revisão deve corrigir as consultas existentes, sem acrescentar outra análise.')
+  }
+  corrected.queries = corrected.queries.map((query, index) => {
+    if (!indexes.has(index) && query.dax !== original.queries[index].dax) throw new Error('A revisão alterou uma consulta sem identificar o problema.')
+    return { ...query, formats: query.formats ?? (query.dax === original.queries[index].dax ? original.queries[index].formats : undefined) }
+  })
+  return { ...corrected, reviewed: true }
 }
 
 export function trimResults(rows: Record<string, unknown>[], maxRows: number) {
