@@ -18,6 +18,7 @@ export function BiAiProgress({ progress, elapsedSeconds }: { progress: BiProgres
       </li>)}
     </ol>
     <p className="mt-4 border-t pt-3 text-xs leading-5 text-muted-foreground" aria-live="polite">{progress.detail}</p>
+    {!!progress.completedQueries && <p className="mt-2 text-xs text-muted-foreground">✓ {progress.completedQueries} consulta{progress.completedQueries > 1 ? 's' : ''} concluída{progress.completedQueries > 1 ? 's' : ''} no Power BI.</p>}
     {elapsedSeconds >= 25 && <p className="mt-2 text-xs leading-5 text-muted-foreground">A análise continua em andamento. Você pode cancelar a pergunta abaixo.</p>}
   </div>
 }

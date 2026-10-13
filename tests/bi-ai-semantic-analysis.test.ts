@@ -87,20 +87,29 @@ test('a new analytical question explores real rows and then executes the publish
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]])); Object.assign(process.env, env)
   const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
   let calls = 0, reads = 0, savedAnswer = '', refreshVersion = 'v1', changeDuring = false, rawMode = false, reviews = 0
+  let sourceReviews = 0
+  let modelChanged = false, changeModelDuring = false
   try {
     globalThis.fetch = async (input, init) => {
       const url = String(input)
       if (url.includes('gs_ia_provider_config')) return json([])
       if (url.includes('login.microsoftonline.com')) return json({ access_token: 'test-access-token', expires_in: 3600 })
-      if (url.includes('/getDefinition')) return json({ definition: { parts: [part] } })
+      if (url.includes('/getDefinition')) return json({ definition: { parts: [modelChanged ? { ...part,
+        payload: Buffer.from(Buffer.from(part.payload, 'base64').toString('utf8') + '\n// Republished during analysis').toString('base64') } : part] } })
       if (url.includes('/refreshes?')) return json({ value: [{ requestId: refreshVersion, status: 'Completed', startTime: '2026-10-13T00:00:00Z' }] })
       if (url.endsWith('/models')) return json({ data: [{ id: 'deepseek-v4.1-flash', max_output_tokens: 393216 }] })
       if (url.endsWith('/chat/completions')) {
         const body = JSON.parse(String(init?.body))
         assert.equal(body.reasoning_effort, 'max')
         if (body.messages[0].content.startsWith('Revise o plano')) {
-          reviews++
           const reviewInput = JSON.parse(body.messages[1].content)
+          if (!rawMode) {
+            sourceReviews++
+            assert(reviewInput.publishedRules.some((source: { measure: string }) => source.measure === 'Visual'))
+            assert.equal(reviewInput.context, undefined)
+            return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(reviewInput.plan) } }] })
+          }
+          reviews++
           assert(reviewInput.plan.queries[0].dax.includes('SUM(Events[Amount])'))
           assert(reviewInput.publishedRules.some((source: { measure: string }) => source.measure === 'Visual'))
           return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({ answerable: true,
@@ -118,6 +127,7 @@ test('a new analytical question explores real rows and then executes the publish
         return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(content) } }], usage: { total_tokens: 10 } })
       }
       if (url.endsWith('/executeQueries')) {
+        if (changeModelDuring) modelChanged = true
         reads++
         const dax = JSON.parse(String(init?.body)).queries[0].query as string
         if (changeDuring) refreshVersion = 'v2'
@@ -141,6 +151,7 @@ test('a new analytical question explores real rows and then executes the publish
     assert.equal(result.queries.length, 2)
     assert.equal(reads, 2)
     assert.equal(calls, 2)
+    assert.equal(sourceReviews, 1)
     assert.equal(savedAnswer, result.answer)
     savedAnswer = ''; changeDuring = true
     await assert.rejects(work(), /atualização do modelo mudou/)
@@ -150,6 +161,9 @@ test('a new analytical question explores real rows and then executes the publish
     assert('answer' in reviewed && reviewed.answer?.includes('1.234,56'))
     assert.equal(reviews, 1)
     assert.equal(reviewed.queries.length, 1)
+    savedAnswer = ''; changeModelDuring = true
+    await assert.rejects(work(), /definição do modelo ou relatório mudou/)
+    assert.equal(savedAnswer, '')
   } finally {
     globalThis.fetch = originalFetch
     for (const name of Object.keys(env)) { if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name] }

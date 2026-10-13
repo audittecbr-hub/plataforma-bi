@@ -39,8 +39,8 @@ vez por requisição usando `AsyncLocalStorage`: uma nova pergunta faz nova
 leitura, incluindo alterações de chave, provedor e ativação. Autorizações do
 usuário continuam sendo verificadas em cada chamada.
 
-O modelo, o raciocínio `max`, o teto de tokens e a checagem dos números não são
-reduzidos para ganhar velocidade. O tempo da inferência ainda varia conforme
+O modelo DeepSeek V4.1 Flash, o teto máximo de saída e a checagem dos números
+são preservados. O nível High foi autorizado para reduzir a espera. O tempo da inferência ainda varia conforme
 a pergunta, o raciocínio necessário e a disponibilidade do provedor.
 
 Quando a pergunta deixa indicador ou período em aberto, o Chat pede um
@@ -165,8 +165,8 @@ acordo com a família do modelo, conforme a [tabela de endpoints do Go](https://
 O catálogo do provedor pode mudar; execute o teste de conexão antes de ativar
 um novo modelo.
 O modelo padrão para novas instalações é `deepseek-v4.1-flash` via OpenCode Go,
-com raciocínio `max`. A configuração global existente também foi selecionada
-para esse modelo em 12/10/2026. A lista ao vivo
+com raciocínio High. A configuração global foi atualizada para High em
+13/10/2026, com autorização do administrador. A lista ao vivo
 mostra todos os modelos retornados pelo OpenCode Go, seus protocolos e um selo
 para os modelos `-free`. Os dois gratuitos presentes na conta em 28/09/2026,
 `space-bunny-free` e `longcat-2.5-preview-free`, responderam a testes pequenos
@@ -384,16 +384,42 @@ pelo operador.
 | `GET /api/bi-ai/history?dashboardId=...` | Conversas do usuário neste dashboard; `conversationId` opcional para mensagens |
 | `GET /api/bi-ai/diagnostic?dashboardId=...` | Apenas admin; lista modelos e executa `EVALUATE ROW("ok", 1)` |
 
-O Chat limita cada mensagem a 500 caracteres, cada plano a até 12 consultas e
-cada resultado a até 500 linhas, conforme o manifesto. O planejador pode
+O Chat aceita mensagens de até 8000 caracteres, planos com até 100 consultas e
+até 100000 linhas por resultado, respeitando o limite de transporte do Power BI. O planejador pode
 inspecionar objetos adicionais do catálogo completo e reparar consultas DAX
 recusadas pelo Power BI. A rota admite até 300 segundos por solicitação; cada
 chamada ao provedor tem limite de tempo próprio. Esses limites evitam loops e
-respeitam as cotas da Microsoft e do provedor de IA.
-DAX pode usar qualquer objeto analítico do modelo vinculado, com saída `ROW`
-ou `TOPN` limitada. Números escritos pela IA são conferidos
-contra as linhas do Power BI; se essa conferência falhar, o servidor apresenta
-um resumo literal e curto do resultado.
+respeitam as cotas da Microsoft e do provedor de IA. Continuações autenticadas
+preservam a investigação entre solicitações. DAX pode usar qualquer objeto
+analítico do modelo vinculado, com expressão tabular de leitura limitada pelo
+servidor. Respostas numéricas são montadas diretamente das linhas do Power BI.
+
+## Planejamento e latência
+
+O padrão de raciocínio do DeepSeek é High; a configuração administrativa prevalece.
+O teto de saída continua sendo o máximo do provedor, incluindo raciocínio.
+O portal mantém o mesmo identificador de sessão nas chamadas de uma conversa.
+Não confunda throughput de geração com o tempo completo: contexto, raciocínio,
+inspeções, consultas e conferências contribuem para a duração da análise.
+
+O primeiro contexto contém definições relevantes e índices para inspecionar o
+restante do modelo. `focus-source` abre o catálogo de uma fonte; `inspect-source`
+recebe `measure` e `variables` e recupera as expressões completas com suas
+dependências. Uma associação de variáveis a outra fonte só é corrigida quando
+existe uma correspondência única dentro do mesmo modelo autorizado.
+
+`source-analysis` reagrupa cálculos `GROUPBY` publicados. Recebe `sourceMeasure`,
+`variable`, `metrics` (nomes e rótulos), `groupBy` (nomes e expressões DAX),
+`filter` opcional e `top` opcional (`count`, `metric`, `descending`). O servidor
+copia a expressão de cada indicador da definição atual, incluindo ponderações
+e arredondamento por registro. DAX livre continua disponível para análises que
+precisem de outras operações. Nada depende de perguntas previamente cadastradas.
+
+Inspeções intermediárias reutilizam metadados, com coalescência de exportações
+concorrentes. A resposta final reconfirma a definição e a atualização do modelo.
+Valores de resposta não são guardados em cache. KPIs sem comparações elegíveis
+dispensam uma chamada de IA. Eventos de atividade do provedor e consultas
+concluídas atualizam o progresso sem transmitir o texto do raciocínio.
 
 O diagnóstico retorna códigos para credenciais Entra ausentes, token, acesso ao
 workspace, modelo não visível, Read/Build, Execute Queries desabilitado,

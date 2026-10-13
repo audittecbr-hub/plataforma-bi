@@ -30,7 +30,7 @@ async function answerRequest(request: Request): Promise<Response> {
     }
     const { user, profile, dashboard } = await authorizedDashboard(body.dashboardId)
     const answer = async (onProgress?: BiProgressReporter, signal = request.signal) => {
-      const [manifest] = await Promise.all([manifestForDashboard(dashboard), lerConfigIa()])
+      const [manifest] = await Promise.all([manifestForDashboard(dashboard, !body.continuationToken), lerConfigIa()])
       return answerBiQuestion({
       dashboard, manifest, userId: user.id, isAdmin: profile?.is_admin === true,
       conversationId: typeof body.conversationId === 'string' ? body.conversationId : null, message: body.message as string,

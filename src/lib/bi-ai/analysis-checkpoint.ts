@@ -9,7 +9,7 @@ export interface AnalysisCheckpoint {
   userId: string; dashboardId: string; conversationId: string; question: string
   modelHash: string; reportHash?: string; issuedAt: number; started: number; round: number
   inspected: string[]; exploration: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }[]
-  queryMeta: { purpose: string; dax: string; rowCount: number }[]
+  queryMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string }[]
   tokens: number; feedback: string; invalidPlans: number; refreshBefore: RefreshHistoryItem | null
   catalogResults?: unknown[]
   plan?: QueryPlan

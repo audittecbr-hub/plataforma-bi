@@ -65,12 +65,86 @@ export function sourceVariables(expression: string): DaxSourceVariable[] {
 /** Resolve only the dependencies used by a query, preserving the model's evaluation order. */
 export function resolveSourceVariables(source: DaxSemanticSource, query: string): DaxSourceVariable[] {
   const code = maskDax(query).toLowerCase(), needed = new Set<string>()
+  const local = new Set([...code.matchAll(/\bVAR\s+([A-Za-z_][A-Za-z0-9_]*)\s*=/gi)].map(match => match[1].toLowerCase()))
   const add = (name: string) => {
     if (needed.has(name)) return
     const variable = source.variables.find(variable => variable.name === name)
     if (!variable) throw new Error('Variável da definição publicada indisponível.')
     needed.add(name); variable.dependencies.forEach(add)
   }
-  for (const variable of source.variables) if (new RegExp(`\\b${variable.name}\\b`, 'i').test(code)) add(variable.name)
+  for (const variable of source.variables) if (!local.has(variable.name.toLowerCase()) && new RegExp(`\\b${variable.name}\\b`, 'i').test(code)) add(variable.name)
   return source.variables.filter(variable => needed.has(variable.name))
+}
+
+/** Calendar/scalar helpers alone do not authenticate an independently rebuilt metric. */
+export function usesPublishedDataRule(variables: DaxSourceVariable[]) {
+  return variables.some(variable => /\b(?:FILTER|SELECTCOLUMNS|ADDCOLUMNS|SUMMARIZECOLUMNS|GROUPBY|NATURALINNERJOIN|NATURALLEFTOUTERJOIN|UNION|SUMX|AVERAGEX|COUNTROWS|SUM)\s*\(/i.test(maskDax(variable.expression)))
+}
+
+/** Correct a source label only when the complete variable set identifies one live source. */
+export function reconcileVariableSource(sources: DaxSemanticSource[], requested: DaxSemanticSource, names: string[]) {
+  const required = [...new Set(names.map(name => name.trim().toLowerCase()))]
+  const matches = (source: DaxSemanticSource) => required.every(name => source.variables.some(variable => variable.name.toLowerCase() === name))
+  if (!required.length || matches(requested)) return requested
+  const alternatives = sources.filter(matches)
+  return alternatives.length === 1 ? alternatives[0] : requested
+}
+
+/** Exact output fields for common table operators; unknown shapes stay unspecified. */
+export function daxFunctionArguments(expression: string) {
+    const code = maskDax(expression), call = /^\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\(/.exec(code)
+    if (!call) return undefined
+    let depth = 0, start = call[0].length
+    const result: string[] = []
+    for (let i = start; i < code.length; i++) {
+      if (code[i] === '(' || code[i] === '{') depth++
+      else if (code[i] === ')' && depth === 0) { result.push(expression.slice(start, i).trim()); return { name: call[1].toUpperCase(), args: result } }
+      else if (code[i] === ')' || code[i] === '}') depth--
+      else if (code[i] === ',' && depth === 0) { result.push(expression.slice(start, i).trim()); start = i + 1 }
+    }
+    return undefined
+}
+
+export function sourceTableFields(source: DaxSemanticSource) {
+  const cache = new Map<string, string[] | undefined>(), visiting = new Set<string>()
+  const literal = (value: string) => /^"((?:[^"\n]|"")*)"$/.exec(value)?.[1].replaceAll('""', '"')
+  const field = (value: string) => /^(?:(?:'[^']+'|[A-Za-z_]\w*)\s*)?\[([^\]]+)\]$/.exec(value)?.[1]
+  const shape = (expression: string | undefined): string[] | undefined => {
+    if (typeof expression !== 'string') return undefined
+    if (/^[A-Za-z_]\w*$/.test(expression.trim())) return get(expression.trim())
+    const call = daxFunctionArguments(expression)
+    if (!call) return undefined
+    const values = call.args
+    if (call.name === 'SELECTCOLUMNS' || call.name === 'ADDCOLUMNS') {
+      const fields: string[] = []
+      for (let i = 1; i < values.length; i += 2) { const name = literal(values[i]); if (!name || !values[i + 1]) return undefined; fields.push(name) }
+      if (call.name === 'SELECTCOLUMNS') return fields
+      const parent = shape(values[0]); return parent ? [...new Set([...parent, ...fields])] : undefined
+    }
+    if (call.name === 'GROUPBY' || call.name === 'SUMMARIZE') {
+      const fields: string[] = []
+      for (let i = 1; i < values.length; i++) {
+        const name = literal(values[i])
+        if (name && values[i + 1]) { fields.push(name); i++ }
+        else { const name = field(values[i]); if (!name) return undefined; fields.push(name) }
+      }
+      return fields
+    }
+    if (['NATURALINNERJOIN', 'NATURALLEFTOUTERJOIN'].includes(call.name)) {
+      const left = shape(values[0]), right = shape(values[1]); return left && right ? [...new Set([...left, ...right])] : undefined
+    }
+    if (['FILTER', 'DISTINCT'].includes(call.name)) return shape(values[0])
+    if (['TOPN', 'SAMPLE'].includes(call.name)) return shape(values[1])
+    return undefined
+  }
+  const get = (name: string): string[] | undefined => {
+    const canonical = source.variables.find(variable => variable.name.toLowerCase() === name.toLowerCase())
+    if (!canonical || visiting.has(canonical.name)) return undefined
+    if (cache.has(canonical.name)) return cache.get(canonical.name)
+    visiting.add(canonical.name)
+    const fields = shape(canonical.expression); cache.set(canonical.name, fields); visiting.delete(canonical.name)
+    return fields
+  }
+  source.variables.forEach(variable => get(variable.name))
+  return cache
 }

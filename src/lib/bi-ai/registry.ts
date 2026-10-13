@@ -30,19 +30,19 @@ export async function previewLiveManifest(dashboard: DashboardRow, forceFresh = 
   return manifest
 }
 
-export async function manifestForDashboard(dashboard: DashboardRow): Promise<BiManifest> {
+export async function manifestForDashboard(dashboard: DashboardRow, forceFresh = true): Promise<BiManifest> {
   if (dashboard.ai_enabled !== true) {
     throw new BiAiError(409, 'AI_DISABLED', 'A IA ainda não está habilitada para este relatório.')
   }
   try {
     const linked = parseLinkedManifest(dashboard)
     if (linked.raw.source && (linked.raw.source as Record<string, unknown>).mode === 'live') {
-      const current = await previewLiveManifest(dashboard, true)
+      const current = await previewLiveManifest(dashboard, forceFresh)
       current.raw.reportReferences = linked.raw.reportReferences
       current.recommendedQuestions = linked.recommendedQuestions.length ? linked.recommendedQuestions : current.recommendedQuestions
       return current
     }
-    const current = await previewLiveManifest(dashboard, true)
+    const current = await previewLiveManifest(dashboard, forceFresh)
     current.raw.reportReferences = linked.raw.reportReferences
     current.recommendedQuestions = linked.recommendedQuestions
     return current

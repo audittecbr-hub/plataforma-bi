@@ -3,6 +3,7 @@ export interface BiProgress {
   total: 3
   title: string
   detail?: string
+  completedQueries?: number
 }
 
 export type BiProgressReporter = (progress: BiProgress) => void
