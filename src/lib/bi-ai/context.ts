@@ -109,6 +109,47 @@ export function compactContextForPlanner(context: SelectedContext, inspected: st
   }
 }
 
+/** Preserve semantic descriptions/formulas without duplicating guard-only flags. */
+export function fullContextForPlanner(context: SelectedContext) {
+  return {
+    business: context.business, businessRules: context.businessRules,
+    availableMeasures: context.availableMeasures, availableDimensions: context.availableDimensions,
+    tables: context.tables,
+    measures: context.measures.map(measure => ({
+      name: measure.name, table: measure.table, description: measure.description,
+      synonyms: measure.synonyms.length ? measure.synonyms : undefined,
+      intent: measure.intent || undefined, whenToUse: measure.whenToUse || undefined,
+      whenNotToUse: measure.whenNotToUse || undefined,
+      publishedExpression: measure.publishedExpression, format: measure.format || undefined,
+      dependencies: measure.dependencies.length ? measure.dependencies : undefined,
+      expectedDimensions: measure.expectedDimensions.length ? measure.expectedDimensions : undefined,
+    })),
+    columns: context.columns.map(column => ({ name: column.name, table: column.table,
+      description: column.description, dataType: column.dataType, aggregatable: column.aggregatable,
+      synonyms: column.synonyms.length ? column.synonyms : undefined })),
+    relationships: context.relationships, reportMap: context.reportMap,
+    examples: context.examples, ambiguities: context.ambiguities, policy: context.policy,
+  }
+}
+
+/** Preload complete, authorized metadata when it fits comfortably in the planner. */
+export function preloadPlannerContext(context: SelectedContext, manifest: BiManifest): SelectedContext {
+  const tables = manifest.tables.filter(table => table.queryable)
+  const columns = tables.flatMap(table => table.columns).filter(column => column.queryable
+    && !column.presentationOnly && (context.allowRestricted || !column.restricted))
+  const measures = manifest.measures.filter(measure => measure.queryable && !measure.presentationOnly
+    && (context.allowRestricted || !measure.restricted)
+    && (!measure.table || tables.some(table => table.name === measure.table)))
+  const expanded: SelectedContext = { ...context,
+    tables: tables.map(({ name, description, fact }) => ({ name, description, fact })),
+    columns, measures,
+    availableMeasures: measures.map(measure => measure.name),
+    availableDimensions: columns.map(column => `${column.table}[${column.name}]`),
+  }
+  // Larger models keep on-demand inspection. No original context is discarded.
+  return JSON.stringify(fullContextForPlanner(expanded)).length <= 72_000 ? expanded : context
+}
+
 /** Mapa do relatório: página → o que mostra → com quais filtros. Vale para manifesto curado e para catálogo ao vivo. */
 function buildReportMap(manifest: BiManifest): string[] {
   const report = asRecord(manifest.report)

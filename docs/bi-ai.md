@@ -22,6 +22,27 @@ o conteúdo HTML e as conexões de origem não entram no contexto da IA.
 O Power BI é a fonte dos números. O Supabase guarda manifesto, mensagens e
 metadados de consultas; não replica fatos nem persiste linhas de resultados.
 
+### Tempo de resposta
+
+Para DeepSeek, modelos cujo catálogo autorizado cabe no orçamento de contexto
+recebem desde o primeiro planejamento todas as colunas, descrições e medidas
+analíticas. Os objetos passam pela mesma conferência do Fabric e guarda DAX.
+Modelos maiores conservam a inspeção sob demanda. O contexto estável do modelo
+vai antes da pergunta e do histórico, favorecendo a reutilização de prefixos
+pela API sem reutilizar respostas nem números do Power BI.
+
+As consultas independentes do plano usam até três execuções em paralelo. Sua
+ordem, correções, registro e validação são preservados; qualquer falha impede
+uma resposta baseada em resultados parciais. Histórico e definição publicada
+também são lidos em paralelo. Configuração e credenciais são consultadas uma
+vez por requisição usando `AsyncLocalStorage`: uma nova pergunta faz nova
+leitura, incluindo alterações de chave, provedor e ativação. Autorizações do
+usuário continuam sendo verificadas em cada chamada.
+
+O modelo, o raciocínio `max`, o teto de tokens e a checagem dos números não são
+reduzidos para ganhar velocidade. O tempo da inferência ainda varia conforme
+a pergunta, o raciocínio necessário e a disponibilidade do provedor.
+
 Quando a pergunta deixa indicador ou período em aberto, o Chat pede um
 esclarecimento antes de executar DAX. A resposta pode ser escolhida em opções
 curtas ou escrita livremente. O servidor combina o esclarecimento com a pergunta

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { createAdminClient } from '@/utils/supabase/admin'
 import { decryptApiKey, encryptApiKey, parseEncryptionKey } from '@/lib/ai-key-crypto'
+import { invalidateAiRequest, memoAiRequest } from '@/lib/ai-request-cache'
 
 export interface ProviderSettings {
   enabled: boolean
@@ -38,6 +39,10 @@ function configuredEnvironmentKey(names: string[]): string | null {
 }
 
 async function providerRow(providerId: string): Promise<ProviderRow | null> {
+  return memoAiRequest(`provider:${providerId}`, () => loadProviderRow(providerId))
+}
+
+async function loadProviderRow(providerId: string): Promise<ProviderRow | null> {
   const { data, error } = await createAdminClient().from('gs_ia_provider_config')
     .select('provider_id, enabled, encrypted_api_key, key_iv, key_tag, disabled_models, updated_at')
     .eq('provider_id', providerId).maybeSingle()
@@ -91,6 +96,7 @@ async function saveRow(providerId: string, patch: Partial<ProviderRow>, userId: 
   }
   const { error } = await createAdminClient().from('gs_ia_provider_config').upsert(next, { onConflict: 'provider_id' })
   if (error) throw error
+  invalidateAiRequest(`provider:${providerId}`)
 }
 
 export async function storeProviderKey(providerId: string, value: string, userId: string): Promise<void> {
