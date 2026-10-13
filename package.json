@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node --conditions=react-server --import tsx --test tests/*.test.ts",
     "smoke:bi-ai": "tsx tests/bi-ai-live-smoke.ts"
   },
   "dependencies": {

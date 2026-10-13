@@ -35,8 +35,6 @@ export function IaTab({ initial }: { initial: Snapshot }) {
   const [providerId, setProviderId] = useState(initial.config.provedorId)
   const [model, setModel] = useState(initial.config.modelo)
   const [effort, setEffort] = useState<ReasoningEffort>(initial.config.reasoningEffort)
-  const [plannerTokens, setPlannerTokens] = useState(initial.config.plannerMaxTokens)
-  const [answerTokens, setAnswerTokens] = useState(initial.config.answerMaxTokens)
   const [keyInputs, setKeyInputs] = useState<Record<string, string>>({})
   const [models, setModels] = useState<Model[]>([])
   const [modelsError, setModelsError] = useState('')
@@ -79,7 +77,7 @@ export function IaTab({ initial }: { initial: Snapshot }) {
 
   async function saveGlobal() {
     const result = await run('global', () => saveAiGlobal({ enabled, providerId, model,
-      reasoningEffort: effort, plannerMaxTokens: plannerTokens, answerMaxTokens: answerTokens }),
+      reasoningEffort: effort }),
     'Configuração do Chat IA salva.')
     if (result) setTestResult('')
   }
@@ -184,10 +182,6 @@ export function IaTab({ initial }: { initial: Snapshot }) {
             <SelectContent>{effortChoices.map((value) => <SelectItem key={value} value={value}>{EFFORT_LABEL[value]}</SelectItem>)}</SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">As opções dependem da API e do modelo. Automático usa o padrão do provedor.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-2"><Label htmlFor="ai-plan-tokens">Tokens do plano</Label><Input id="ai-plan-tokens" type="number" min={1000} max={12000} value={plannerTokens} onChange={(event) => setPlannerTokens(Number(event.target.value))} /></div>
-          <div className="space-y-2"><Label htmlFor="ai-answer-tokens">Tokens da resposta</Label><Input id="ai-answer-tokens" type="number" min={500} max={8000} value={answerTokens} onChange={(event) => setAnswerTokens(Number(event.target.value))} /></div>
         </div>
         <div className="flex flex-wrap items-center gap-2 md:col-span-2">
           <Button type="button" onClick={saveGlobal} disabled={!!busy || !initial.migrationReady}>{busy === 'global' && <LoaderCircle className="size-4 animate-spin" />}Salvar configuração</Button>

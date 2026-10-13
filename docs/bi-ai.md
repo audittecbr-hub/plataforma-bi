@@ -101,8 +101,8 @@ serviço, sem depender de login Microsoft por usuário.
    políticas para o browser; o servidor usa `service_role`.
 3. Configure `PORTAL_AI_REGISTRATION_SECRET` no servidor e nos scripts PBIP.
    Não use variável `NEXT_PUBLIC_*` para esse secret nem para chaves de IA.
-4. A tabela já existente `gs_config_ia` seleciona provedor, modelo, ativação,
-   nível de raciocínio e limites de tokens. Configure a chave correspondente no
+4. A tabela já existente `gs_config_ia` seleciona provedor, modelo, ativação e
+   nível de raciocínio. Configure a chave correspondente no
    ambiente do portal ou pela aba Administração → IA. Para salvar uma chave na
    interface, configure `BI_AI_ENCRYPTION_KEY` no servidor com 32 bytes
    aleatórios codificados em Base64 (por exemplo, gere com
@@ -122,10 +122,20 @@ serviço, sem depender de login Microsoft por usuário.
 
 Na aba IA, o administrador pode ativar/desativar o Chat globalmente, cada
 provedor, modelos descobertos pela API e dashboards com vínculo Power BI;
-selecionar o modelo exato, testar a conexão, ajustar nível de raciocínio onde
-o adaptador suporta e limites de tokens de planejamento e resposta. Para
-OpenCode Go, o nível fica no padrão do modelo; DeepSeek permite desativar o
-raciocínio ou usar `low/high/max` (`medium` é mapeado para `high` pela API).
+selecionar o modelo exato, testar a conexão e ajustar o nível de raciocínio onde
+o adaptador suporta. Os controles de tokens foram removidos: planejamento,
+reparo de consultas e respostas usam `maxTokens: 'maximum'`. As colunas antigas
+`planner_max_tokens` e `answer_max_tokens` não são lidas nem gravadas pelo portal.
+O servidor consulta o teto de saída informado pelo catálogo do provedor, com
+cache de dez minutos; quando o catálogo do Go não contém esse metadado, usa o
+teto documentado do DeepSeek V4.1 Flash, **393.216 tokens**, confirmado por chamada
+real em 12/10/2026. O limite inclui o raciocínio e a resposta, e a geração pode
+terminar antes dele. Outros modelos sem esse metadado usam a configuração nativa
+da API. O texto final também não é mais cortado em 3.500 caracteres.
+Veja a [API do DeepSeek](https://api-docs.deepseek.com/api/create-chat-completion/)
+e o [catálogo de modelos](https://api-docs.deepseek.com/api/list-models/).
+DeepSeek V4.1 Flash, direto ou via OpenCode Go, permite desativar o raciocínio ou
+usar `low/high/max` (`medium` é mapeado para `high` pela API).
 OpenAI e Anthropic expõem níveis apenas para
 famílias de modelos suportadas. O teste de conexão faz uma chamada pequena ao
 provedor e pode consumir tokens da conta configurada.
@@ -133,7 +143,9 @@ No OpenCode Go, o Portal escolhe Chat Completions, Messages ou Responses de
 acordo com a família do modelo, conforme a [tabela de endpoints do Go](https://dev.opencode.ai/docs/go/#endpoints).
 O catálogo do provedor pode mudar; execute o teste de conexão antes de ativar
 um novo modelo.
-O modelo padrão para novas instalações é `longcat-2.5-preview-free`. A lista ao vivo
+O modelo padrão para novas instalações é `deepseek-v4.1-flash` via OpenCode Go,
+com raciocínio `max`. A configuração global existente também foi selecionada
+para esse modelo em 12/10/2026. A lista ao vivo
 mostra todos os modelos retornados pelo OpenCode Go, seus protocolos e um selo
 para os modelos `-free`. Os dois gratuitos presentes na conta em 28/09/2026,
 `space-bunny-free` e `longcat-2.5-preview-free`, responderam a testes pequenos

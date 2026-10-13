@@ -223,7 +223,7 @@ export function parseAnswer(text: string): string {
     raw = { answer: text.trim().replace(/^```(?:text)?\s*/i, '').replace(/\s*```$/, '') }
   }
   const answer = typeof raw.answer === 'string'
-    ? raw.answer.replace(/<[^>]*>/g, ' ').replace(/[A-Za-z0-9+/]{300,}={0,2}/g, '[conteúdo omitido]').trim().slice(0, 3500)
+    ? raw.answer.replace(/<[^>]*>/g, ' ').replace(/[A-Za-z0-9+/]{300,}={0,2}/g, '[conteúdo omitido]').trim()
     : ''
   if (!answer) throw new Error('A IA não devolveu uma explicação.')
   return answer
