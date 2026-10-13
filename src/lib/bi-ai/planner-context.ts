@@ -88,7 +88,8 @@ export function focusedPlannerContext(context: SelectedContext, manifest: BiMani
       columns: table.columns.filter(column => column.queryable && !column.presentationOnly && (!column.restricted || context.allowRestricted))
         .filter(column => expanded(undefined, table.name) || expanded(table.name, column.name) || selectedColumns.has(`${table.name}[${column.name}]`))
         .map(column => [column.name, column.dataType]) })),
-    availableMeasures: context.availableMeasures,
+    availableMeasures: dataSources.length ? chosen.filter(measure => expanded(measure.table, measure.name)).map(measure => measure.name) : context.availableMeasures,
+    inspectRemainingCatalog: 'search-catalog e inspect cobrem todas as tabelas, colunas e medidas do projeto.',
     measures: chosen.filter(measure => !dataSources.length || expanded(measure.table, measure.name)).map(measure => ({ name: measure.name, table: measure.table,
       description: measure.description.slice(0, expanded(measure.table, measure.name) ? undefined : sources.length ? 160 : 700),
       expression: expanded(measure.table, measure.name) || !sources.length && (measure.publishedExpression?.length ?? Infinity) <= 2000

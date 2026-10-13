@@ -16,7 +16,7 @@ import { escapeMarkdown, SOURCE_SECTION } from './message-format'
 import { isGeneralJobLookup, jobCodeIn, resolveJobContext } from './entity-context'
 import { loadJobDetails } from './job-details'
 import { prepareSemanticQuery } from './semantic-query'
-import { maskDax, usesPublishedDataRule, sourceTableFields, resolveSourceVariables } from './dax-source'
+import { maskDax, usesPublishedDataRule, sourceTableFields } from './dax-source'
 import { publishedAggregations } from './source-analysis'
 import { PLANNER_INSTRUCTIONS } from './planner-instructions'
 import { focusedPlannerContext, plannerReportReferences, rankSemanticSources } from './planner-context'
@@ -299,7 +299,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   let planError = checkpoint?.feedback ?? ''
   let invalidPlans = checkpoint?.invalidPlans ?? 0
   const exploration: { purpose: string; rows: Record<string, unknown>[]; truncated: boolean }[] = checkpoint?.exploration ?? []
-  const explorationMeta: { purpose: string; dax: string; rowCount: number }[] = checkpoint?.queryMeta ?? []
+  const explorationMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string }[] = checkpoint?.queryMeta ?? []
   const modelActivity = (step: 1 | 2 | 3, reasoning: string, output: string) => (activity: 'reasoning' | 'output') => {
     input.onProgress?.({ ...biProgress(step, activity === 'reasoning' ? reasoning : output), completedQueries: explorationMeta.length })
   }
@@ -338,7 +338,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       const normalized = normalizeGroupedRows(raw, execution, message), result = trimResults(normalized.rows, query.maxRows)
       await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id, semanticModelId: input.manifest.semanticModelId,
         dax: execution.dax, durationMs: Date.now() - began, rowCount: result.rowCount, status: 'success' })
-      return { query: { ...query, dax: execution.dax }, ...result, blankGroupsExcluded: normalized.blankGroupsExcluded }
+      return { query: { ...query, dax: execution.dax, body: prepared.body, sourceMeasure: prepared.sourceMeasure }, ...result, blankGroupsExcluded: normalized.blankGroupsExcluded }
     } catch (error) {
       await recordQueryLog({ userId: input.userId, dashboardId: input.dashboard.id, semanticModelId: input.manifest.semanticModelId,
         dax: execution.dax, durationMs: Date.now() - began, rowCount: 0, status: 'error', errorCode: error instanceof PowerBiQueryError ? error.code : 'UNKNOWN' })
@@ -422,7 +422,8 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         try {
           const results = await mapConcurrent(candidate.queries, 3, executePlanned, input.signal)
           exploration.push(...results.map(result => ({ purpose: result.query.purpose, rows: result.rows, truncated: result.truncated })))
-          explorationMeta.push(...results.map(result => ({ purpose: result.query.purpose, dax: result.query.dax, rowCount: result.rowCount })))
+          explorationMeta.push(...results.map(result => ({ purpose: result.query.purpose, dax: result.query.dax, rowCount: result.rowCount,
+            body: result.query.body, sourceMeasure: result.query.sourceMeasure })))
           planError = 'Exploração executada. Analise as linhas reais e conclua ou investigue o que falta.'
         } catch (error) {
           if (!(error instanceof PowerBiQueryError) || error.code !== 'INVALID_DAX') throw error
@@ -472,10 +473,10 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     const queryIndexes = [...new Set(plan.answerResults.map(selection => selection.index))]
     const unreviewed = queryIndexes.flatMap(index => {
       const meta = explorationMeta[index]
-      if (!meta || /^DEFINE\b/i.test(meta.dax.trim()) || !liveSchema?.measures.some(measure => measure.semanticSource)
-        || !/\b(?:SUM|SUMX|GROUPBY|SUMMARIZECOLUMNS|DISTINCTCOUNT|COUNTROWS|AVERAGE)\b/i.test(maskDax(meta.dax))) return []
-      return [{ purpose: exploration[index]?.purpose ?? meta.purpose, dax: meta.dax,
-        maxRows: Math.max(1, exploration[index]?.rows.length ?? 100) }]
+      if (!meta || !meta.body && /^DEFINE\b/i.test(meta.dax.trim()) || !liveSchema?.measures.some(measure => measure.semanticSource)
+        || !/\b(?:TOPN|SUM|SUMX|GROUPBY|SUMMARIZECOLUMNS|DISTINCTCOUNT|COUNTROWS|AVERAGE)\b/i.test(maskDax(meta.body ?? meta.dax))) return []
+      return [{ purpose: exploration[index]?.purpose ?? meta.purpose, dax: meta.body ?? meta.dax, sourceMeasure: meta.sourceMeasure,
+        maxRows: Math.max(100, exploration[index]?.rows.length ?? 100) }]
     })
     if (unreviewed.length) return continueAnalysis({ ...plan, answerResults: undefined, queries: unreviewed })
     const selected = plan.answerResults.map(selection => {
@@ -551,16 +552,6 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         }
       }) : undefined
       const rankedRules = rankSemanticSources(relevant, message, currentReportRules)
-      const copiedRules = rankedRules.flatMap(source => {
-        const names = source.variables.filter(variable => new RegExp(`\\b${variable.name}\\b`, 'i').test(maskDax(expressions))).map(variable => variable.name)
-        const variables = resolveSourceVariables(source, names.join(' '))
-        if (!usesPublishedDataRule(variables)) return []
-        const used = new Set(variables.map(variable => variable.name)), fields = sourceTableFields(source)
-        return [{ measure: source.measure, description: source.description.slice(0, 1600),
-          variables: variables.map(({ name, expression }) => ({ name, expression, fields: fields.get(name) })),
-          sourceAggregations: publishedAggregations(source).filter(aggregate => used.has(aggregate.base)),
-        }]
-      }).slice(0, 1)
       const ordered = rankedRules.map(source => ({ measure: source.measure, table: source.table,
         description: source.description.slice(0, inspectedObjects.has(source.measure) ? undefined : 2500),
         variables: source.variables.map(({ name, expression }) => ({ name, expression })),
@@ -572,8 +563,8 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       const review = await conversar(config, [
         { role: 'system', content: `Revise o plano DAX antes de executar. A pergunta é o objetivo; as regras são a definição atual do modelo publicado. Confira se CADA consulta realmente responde ao pedido, respeita a situação/status, a data do evento, chaves, deduplicação, grão, filtros, arredondamentos por registro e sentido da ordenação. SUM(Valor) com ROUND só no final pode diferir de SUMX(tabela, ROUND(Valor, 2)) usado no visual. Não acrescente análises não solicitadas. Um pedido pelo maior/menor elemento pede o vencedor e empates, não uma lista grande. Purpose deve ser um título curto; coloque filtros em assumptions. Para indicadores do relatório, use exatamente a regra publicada; para um recorte explicitamente diferente pedido pelo usuário, preserve o recorte e informe a diferença. Prefira sourceMeasure com as variáveis publicadas; o servidor injeta as dependências completas. A medida HTML não é um número. Retorne somente JSON de plano final {"answerable":true,"queries":[{"purpose":"...","dax":"EVALUATE ...","maxRows":100,"sourceMeasure":"opcional"}],"assumptions":[]}. Campos da variável são [alias]. Se o plano já está correto, mantenha-o. Não peça esclarecimento sobre informação já disponível na pergunta ou nas regras.` },
         { role: 'user', content: JSON.stringify({ question: message, plan,
-          context: sourceBacked || copiedRules.length ? undefined : focusedPlannerContext(context, input.manifest, message, []),
-          publishedRules: sourceRules ?? (copiedRules.length ? copiedRules : sources), visualIndicators: plannerReportReferences(currentReportRules) }) },
+          context: sourceBacked ? undefined : focusedPlannerContext(context, input.manifest, message, []),
+          publishedRules: sourceRules ?? sources, visualIndicators: plannerReportReferences(currentReportRules) }) },
       ], { temperatura: 0, maxTokens: 'maximum', sessao: session, reasoningEffort: config.reasoningEffort, jsonObrigatorio: true, signal: input.signal,
         onActivity: modelActivity(2, 'A IA está conferindo os filtros e cálculos com as fórmulas publicadas.', 'A conferência das regras está sendo concluída.') })
       plannerTokens += review.tokens
