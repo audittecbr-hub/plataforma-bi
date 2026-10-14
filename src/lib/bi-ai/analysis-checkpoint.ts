@@ -12,6 +12,8 @@ export interface AnalysisCheckpoint {
   queryMeta: { purpose: string; dax: string; rowCount: number; body?: string; sourceMeasure?: string; formats?: PlannedQuery['formats'] }[]
   tokens: number; feedback: string; invalidPlans: number; refreshBefore: RefreshHistoryItem | null
   catalogResults?: unknown[]
+  /** Answer-cache key of the original question, so the final step can store the answer. */
+  cacheKey?: string
   plan?: QueryPlan
 }
 

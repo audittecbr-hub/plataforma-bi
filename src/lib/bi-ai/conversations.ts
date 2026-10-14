@@ -68,6 +68,10 @@ export async function recordTurn(input: {
   model: string
   tokens: number
   durationMs: number
+  /** Served from the answer cache of the same model refresh. */
+  cached?: boolean
+  /** Per-step timings and tokens, for the AI health panel. */
+  telemetry?: unknown
 }): Promise<void> {
   const admin = createAdminClient()
   const { error } = await admin.from('gs_chat_log').insert({
@@ -82,6 +86,8 @@ export async function recordTurn(input: {
     modelo: input.model,
     tokens: input.tokens,
     ms: input.durationMs,
+    cacheado: input.cached === true,
+    conferencia: input.telemetry ?? {},
   })
   if (error) {
     console.error('[bi-ai] save turn:', error)

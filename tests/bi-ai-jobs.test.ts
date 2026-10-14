@@ -42,7 +42,7 @@ test('job values respect explicit Power BI number masks and time fields', () => 
 
 test('job dossiers read every eligible table, preserve source values and reject incomplete or changing data', async () => {
   const originalFetch = globalThis.fetch
-  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://job-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-job-service-secret-long-enough',
+  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://job-test.supabase.co', BI_AI_PERSISTENT_CACHE: 'off', SUPABASE_SERVICE_ROLE_KEY: 'test-job-service-secret-long-enough',
     OPENCODE_API_KEY: 'test-provider-key', POWERBI_TENANT: 'test-tenant', POWERBI_CLIENT_ID: 'test-client', POWERBI_CLIENT_SECRET: 'test-secret' }
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
   Object.assign(process.env, env)

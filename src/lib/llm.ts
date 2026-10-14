@@ -258,6 +258,30 @@ function mensagemAmigavel(status: number, provedor: string, detalhe: string): st
 // Adaptador OpenAI Chat Completions (OpenCode Go, OpenAI, DeepSeek)
 // ---------------------------------------------------------------------------
 
+/**
+ * Medido em 14/10/2026: o provedor às vezes não abre a resposta e a chamada ficava muda até o
+ * limite total de 4,5 min. Sem início de resposta em 45 s, a mesma chamada é refeita uma vez.
+ * Depois que a resposta começa, vale só o limite total da chamada.
+ */
+async function fetchComInicio(url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
+    const limite = Number(process.env.BI_AI_FIRST_BYTE_MS) || 45_000
+    for (let tentativa = 1; ; tentativa++) {
+        const inicio = new AbortController()
+        const espera = setTimeout(() => inicio.abort(new Error('Provedor sem resposta.')), limite)
+        try {
+            return await fetch(url, { ...init, signal: AbortSignal.any([signal, inicio.signal]) })
+        } catch (error) {
+            if (inicio.signal.aborted && !signal.aborted && tentativa < 2) {
+                console.warn(`[llm] provedor sem resposta em ${limite} ms; repetindo a chamada.`)
+                continue
+            }
+            throw error
+        } finally {
+            clearTimeout(espera)
+        }
+    }
+}
+
 async function conversarOpenAI(
     p: ProvedorLlm,
     chave: string,
@@ -311,12 +335,11 @@ async function conversarOpenAI(
     }
 
     const timeout = AbortSignal.timeout(deepSeekThinkingModel(p.id, modelo) ? 270_000 : 90_000)
-    const r = await fetch(`${p.baseUrl}/chat/completions`, {
+    const r = await fetchComInicio(`${p.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: cabecalhos,
         body: JSON.stringify(corpo),
-        signal: opcoes.signal ? AbortSignal.any([opcoes.signal, timeout]) : timeout,
-    })
+    }, opcoes.signal ? AbortSignal.any([opcoes.signal, timeout]) : timeout)
 
     if (!r.ok) {
         const detalhe = (await r.text()).slice(0, 400)

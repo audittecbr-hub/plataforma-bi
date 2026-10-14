@@ -2,6 +2,8 @@ import { getFabricAccessToken } from '@/lib/powerbi'
 import { invalidateAiRequest, memoAiRequest } from '@/lib/ai-request-cache'
 import { UUID } from './manifest'
 import { parsePublishedSchema, type FabricPart, type PublishedSchema } from './fabric-schema'
+import { liveAndStore, snapshotOrLive } from './snapshot-store'
+import { recordMetadata } from './telemetry'
 
 class FabricDefinitionError extends Error {
   constructor(readonly status: number | null, message: string) { super(message) }
@@ -78,7 +80,15 @@ async function load(workspaceId: string, semanticModelId: string, reportId: stri
   return parsePublishedSchema(model, report)
 }
 
-/** Live, read-only Fabric metadata, cached per server instance for 10 minutes. */
+function snapshotPath(key: string): string {
+  return `snapshots/schema/${key.replaceAll(':', '_')}.json.gz`
+}
+
+/**
+ * Published Fabric metadata. Questions read the synchronized snapshot (refreshed in the
+ * background every 15 minutes); `forceFresh` reads Fabric live and refreshes the snapshot.
+ * Cached per server instance for 10 minutes on top of that.
+ */
 export function publishedSchema(workspaceId: string, semanticModelId: string, reportId: string | null, forceFresh = false): Promise<PublishedSchema> {
   if (!UUID.test(workspaceId) || !UUID.test(semanticModelId) || (reportId && !UUID.test(reportId))) {
     throw new FabricDefinitionError(null, 'Identidade Fabric inválida.')
@@ -94,7 +104,12 @@ function readPublishedSchema(key: string, workspaceId: string, semanticModelId: 
   if (pending) return pending
   const cached = cache.get(key)
   if (!forceFresh && cached && cached.expiresAt > Date.now()) return cached.promise
-  const promise = load(workspaceId, semanticModelId, reportId)
+  const began = Date.now()
+  const live = () => load(workspaceId, semanticModelId, reportId)
+  const promise = (forceFresh ? liveAndStore(snapshotPath(key), live)
+    : snapshotOrLive(snapshotPath(key), live, (value) => {
+      cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(value) })
+    })).finally(() => recordMetadata(Date.now() - began))
   inFlight.set(key, promise)
   cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise })
   promise.catch(() => { if (cache.get(key)?.promise === promise) cache.delete(key) })

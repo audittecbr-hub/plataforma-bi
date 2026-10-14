@@ -1,6 +1,7 @@
 import 'server-only'
 
-import { conversar, chaveDoProvedor, obterProvedor } from '@/lib/llm'
+import { createHash } from 'node:crypto'
+import { chaveDoProvedor, obterProvedor } from '@/lib/llm'
 import { lerConfigIa, type ConfigIa } from '@/lib/llm-config'
 import { modelEnabled } from '@/lib/ai-keyring'
 import { deepSeekThinkingModel, modelSupportedByAdapter } from '@/lib/ai-reasoning'
@@ -24,7 +25,11 @@ import { nativeMeasureRules } from './measure-dependencies'
 import { readWithCapacityFallback, reuseRowCalculations } from './dax-performance'
 import { auditResultQuery, resultCatalog } from './result-query'
 import { issueAnalysisCheckpoint, readAnalysisCheckpoint, type AnalysisCheckpoint } from './analysis-checkpoint'
-import { publishedSchema, recheckPublishedSchema } from './fabric-context'
+import { publishedSchema } from './fabric-context'
+import { readStored, writeStored } from './snapshot-store'
+import { inBackground } from './background'
+import { markCached, recordDax, telemetrySnapshot, withBiTelemetry } from './telemetry'
+import { conversarEtapa, explainerEffort } from './stages'
 import { PublishedSchemaError, withPublishedSchema, type PublishedSchema } from './fabric-schema'
 import { clarificationKey, ClarificationError,
   continueClarification, issueClarificationToken, readClarificationToken,
@@ -35,6 +40,43 @@ import { answerIsGrounded, normalizeGroupedRows, parseAnswer, parsePlan, parseRe
   trimResults, metadataOnlyQuestion, type PlannedQuery, type QueryPlan } from './plan'
 
 const MAX_MESSAGE = 8000
+
+/**
+ * 'risco' (default) skips the second AI review when every query reuses the server-injected
+ * published rule (sourceMeasure variables) and derives nothing from earlier results; free DAX
+ * that re-implements a rule is still reviewed. 'sempre' reviews every aggregated plan.
+ * Measured on the golden set (14/10/2026): same accuracy, 60–150 s less on analytical questions.
+ */
+function reviewPolicy(): 'sempre' | 'risco' {
+  return process.env.BI_AI_REVIEW_POLICY === 'sempre' ? 'sempre' : 'risco'
+}
+
+/** Bump when the answer logic changes so older cached answers stop being served. */
+const ANSWER_CACHE_VERSION = 'v1'
+const ANSWER_CACHE_MAX_AGE = 24 * 60 * 60_000
+
+interface CachedAnswer {
+  answer: string
+  queries: { purpose: string; rowCount: number }[]
+}
+
+function answerCachePath(dashboardId: string, key: string): string {
+  return `answers/${dashboardId}/${key}.json.gz`
+}
+
+/**
+ * Same question, same published definition, same refresh and same AI configuration
+ * produce the same verified answer, so it can be reused until the next refresh.
+ */
+function answerCacheKey(input: { dashboardId: string; isAdmin: boolean; message: string; config: ConfigIa
+  schema: PublishedSchema; refresh: { requestId: string; status: string; endTime?: string } | null }): string | null {
+  if (!input.refresh || !['Completed', 'Failed'].includes(input.refresh.status)) return null
+  const question = normalizeTerm(input.message).replace(/[?!.;:]+$/g, '').replace(/\s+/g, ' ').trim()
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'America/Sao_Paulo' }).format(new Date())
+  return createHash('sha256').update(JSON.stringify([ANSWER_CACHE_VERSION, input.dashboardId, input.isAdmin, question,
+    input.schema.modelHash, input.schema.reportHash ?? '', input.refresh.requestId, input.refresh.status, input.refresh.endTime ?? '',
+    input.config.provedorId, input.config.modelo, input.config.reasoningEffort, today])).digest('hex')
+}
 
 /** Internal QA storage adapter; HTTP routes never accept this from the browser. */
 export interface BiAuditServices {
@@ -100,14 +142,24 @@ async function saveTurn(input: {
   queries: { purpose: string; dax: string; rowCount: number }[]
   provider: string; model: string; tokens: number; started: number
   audit?: BiAuditServices
+  /** Answer-cache key of this question; null when it is contextual or the data is changing. */
+  cacheKey?: string | null
+  /** Fallback answers (clarification limit, not answerable) are never reused. */
+  cacheable?: boolean
+  cached?: boolean
 }) {
   await (input.audit?.recordTurn ?? recordTurn)({
     userId: input.userId, dashboardId: input.dashboard.id,
     conversationId: input.conversationId, dashboardName: input.dashboard.name,
     question: input.message, answer: input.answer, queries: input.queries,
     provider: input.provider, model: input.model, tokens: input.tokens,
-    durationMs: Date.now() - input.started,
+    durationMs: Date.now() - input.started, cached: input.cached === true, telemetry: telemetrySnapshot(),
   })
+  if (input.cacheKey && input.cacheable !== false && !input.cached) {
+    const entry: CachedAnswer = { answer: input.answer, queries: input.queries.map(({ purpose, rowCount }) => ({ purpose, rowCount })) }
+    const path = answerCachePath(input.dashboard.id, input.cacheKey)
+    inBackground(() => writeStored(path, entry))
+  }
 }
 
 export interface BiQuestionInput {
@@ -120,18 +172,28 @@ export interface BiQuestionInput {
   clarificationToken?: string | null
   continuationToken?: string | null
   yieldAnalysis?: boolean
+  /**
+   * With yieldAnalysis, keep investigating inside this request until this much time has passed,
+   * then hand a continuation to the browser. Keeps short analyses in one request without
+   * risking the function time limit on long ones. 0 yields after every step.
+   */
+  yieldAfterMs?: number
   signal?: AbortSignal
   audit?: BiAuditServices
   onProgress?: BiProgressReporter
 }
 
 export async function answerBiQuestion(input: BiQuestionInput) {
-  let current = input
-  while (true) {
-    const result = await answerBiQuestionStep(current)
-    if (!('continuationToken' in result) || input.yieldAnalysis) return result
-    current = { ...current, conversationId: result.conversationId, continuationToken: result.continuationToken, clarificationToken: null }
-  }
+  return withBiTelemetry(async () => {
+    const began = Date.now()
+    let current = input
+    while (true) {
+      const result = await answerBiQuestionStep(current)
+      if (!('continuationToken' in result)) return result
+      if (input.yieldAnalysis && Date.now() - began >= (input.yieldAfterMs ?? 0)) return result
+      current = { ...current, conversationId: result.conversationId, continuationToken: result.continuationToken, clarificationToken: null }
+    }
+  })
 }
 
 async function answerBiQuestionStep(input: BiQuestionInput) {
@@ -142,7 +204,11 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     throw new BiAiError(400, 'INVALID_MESSAGE', `A pergunta deve ter de 1 a ${MAX_MESSAGE} caracteres.`)
   }
   const config = input.audit?.configuration ?? await lerConfigIa()
-  const recordQueryLog = input.audit?.recordQueryLog ?? persistQueryLog
+  const persistLog = input.audit?.recordQueryLog ?? persistQueryLog
+  const recordQueryLog: typeof persistQueryLog = async (entry) => {
+    recordDax(entry.durationMs)
+    return persistLog(entry)
+  }
   const provider = obterProvedor(config.provedorId)
   if (!config.enabled) throw new BiAiError(409, 'AI_DISABLED', 'O Chat IA está desativado pelo administrador.')
   let keyReady = false
@@ -197,9 +263,12 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   }
   const entity = resolveJobContext(message, history)
   message = entity.question
-  const [schemaResult] = await Promise.allSettled([
-    publishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId,
-      !input.continuationToken),
+  // The synchronized snapshot and the refresh stamp are read together; the stamp is what makes
+  // a stored answer reusable and what every final answer compares against.
+  const [schemaResult, refreshResult] = await Promise.allSettled([
+    publishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId),
+    checkpoint ? Promise.resolve(checkpoint.refreshBefore)
+      : getLatestRefreshStatus(input.manifest.workspaceId, input.manifest.semanticModelId, input.signal),
   ])
   let context = selectContext(input.manifest, message, input.isAdmin)
   const initialContext = context
@@ -232,13 +301,29 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   if (checkpoint && (checkpoint.modelHash !== liveSchema?.modelHash || checkpoint.reportHash !== liveSchema?.reportHash)) {
     throw new BiAiError(409, 'MODEL_CHANGED', 'A definição do modelo ou relatório mudou durante a análise. Refaça a pergunta.')
   }
+  // Only the first question of a new conversation is reusable: follow-ups depend on history.
+  const answerKey = checkpoint ? checkpoint.cacheKey ?? null
+    : !input.clarificationToken && input.conversationId === null && liveSchema && refreshResult.status === 'fulfilled'
+      ? answerCacheKey({ dashboardId: input.dashboard.id, isAdmin: input.isAdmin, message, config, schema: liveSchema, refresh: refreshResult.value })
+      : null
+  const save = (turn: Parameters<typeof saveTurn>[0]) => saveTurn({ ...turn, cacheKey: answerKey })
+  if (answerKey && !checkpoint) {
+    const stored = await readStored<CachedAnswer>(answerCachePath(input.dashboard.id, answerKey))
+    if (stored && Date.now() - stored.savedAt < ANSWER_CACHE_MAX_AGE && typeof stored.value?.answer === 'string') {
+      markCached()
+      input.onProgress?.(biProgress(3, 'Resposta já conferida nesta mesma atualização do modelo.'))
+      await save({ ...input, conversationId, message, answer: stored.value.answer, queries: [], provider: 'cache',
+        model: config.modelo, tokens: 0, started, cached: true })
+      return { conversationId, answer: stored.value.answer, queries: stored.value.queries ?? [], assumptions: [], truncated: false, cached: true }
+    }
+  }
   if (!checkpoint && entity.jobCode && isGeneralJobLookup(message)) {
     const details = await loadJobDetails({ manifest: input.manifest, jobCode: entity.jobCode, question: message,
       isAdmin: input.isAdmin, signal: input.signal, onProgress: input.onProgress,
       onQuery: entry => recordQueryLog({ ...entry, userId: input.userId, dashboardId: input.dashboard.id,
         semanticModelId: input.manifest.semanticModelId }) })
     if (details) {
-      await saveTurn({ ...input, conversationId, message, answer: details.answer, queries: details.queries,
+      await save({ ...input, conversationId, message, answer: details.answer, queries: details.queries,
         provider: 'powerbi-records', model: config.modelo, tokens: 0, started })
       return { conversationId, answer: details.answer, queries: details.queries.map(({ purpose, rowCount }) => ({ purpose, rowCount })),
         assumptions: [], truncated: details.truncated, entity: { kind: 'job', id: entity.jobCode } }
@@ -257,7 +342,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
           semanticModelId: input.manifest.semanticModelId }) })
       // A reference is an optional fast path. A new question/filter is investigated by the planner.
       if (reference?.answer) {
-        await saveTurn({ ...input, conversationId, message, answer: reference.answer,
+        await save({ ...input, conversationId, message, answer: reference.answer,
           queries: reference.queries, provider: provider.id, model: config.modelo, tokens: reference.tokens ?? 0, started })
         return { conversationId, answer: reference.answer,
           queries: reference.queries.map(({ purpose, rowCount }) => ({ purpose, rowCount })),
@@ -299,13 +384,15 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     input.onProgress?.({ ...biProgress(step, activity === 'reasoning' ? reasoning : output), completedQueries: explorationMeta.length })
   }
   const catalogResults: unknown[] = checkpoint?.catalogResults ?? []
-  const refreshBefore = checkpoint ? checkpoint.refreshBefore : await getLatestRefreshStatus(input.manifest.workspaceId, input.manifest.semanticModelId, input.signal)
+  const refreshBefore = checkpoint ? checkpoint.refreshBefore : refreshResult.status === 'fulfilled' ? refreshResult.value
+    : await getLatestRefreshStatus(input.manifest.workspaceId, input.manifest.semanticModelId, input.signal)
   if (refreshBefore && ['Unknown', 'InProgress'].includes(refreshBefore.status)) throw new BiAiError(409, 'MODEL_REFRESH_IN_PROGRESS', 'O modelo está sendo atualizado. Repita a pergunta após a conclusão.')
   const verifyCurrentData = async () => {
-    // Intermediate continuations reuse metadata; every final answer checks it live.
+    // Every final answer checks the refresh live. The definition is the synchronized snapshot
+    // (revalidated every 15 minutes); a newer one seen by this server still blocks the answer.
     const [refresh, schema] = await Promise.all([
       getLatestRefreshStatus(input.manifest.workspaceId, input.manifest.semanticModelId, input.signal),
-      recheckPublishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId),
+      publishedSchema(input.manifest.workspaceId, input.manifest.semanticModelId, input.manifest.reportId),
     ])
     if (liveSchema && (liveSchema.modelHash !== schema.modelHash || liveSchema.reportHash !== schema.reportHash)) {
       throw new BiAiError(409, 'MODEL_CHANGED', 'A definição do modelo ou relatório mudou durante a análise. Refaça a pergunta.')
@@ -321,7 +408,8 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     return { conversationId, continuationToken: issueAnalysisCheckpoint({ userId: input.userId, dashboardId: input.dashboard.id,
       conversationId, question: message, modelHash: liveSchema.modelHash, reportHash: liveSchema.reportHash,
       issuedAt: Date.now(), started, round, inspected: [...inspectedObjects], exploration, queryMeta: explorationMeta,
-      tokens: plannerTokens, feedback: planError, invalidPlans, refreshBefore, catalogResults, ...(plan ? { plan } : {}) }), queries: [], assumptions: [] }
+      tokens: plannerTokens, feedback: planError, invalidPlans, refreshBefore, catalogResults,
+      ...(answerKey ? { cacheKey: answerKey } : {}), ...(plan ? { plan } : {}) }), queries: [], assumptions: [] }
   }
   const executePlanned = async (query: PlannedQuery) => {
     const prepared = prepareSemanticQuery({ ...query, context: executionContext(), manifest: input.manifest, results: exploration })
@@ -362,7 +450,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     const feedback = planError ? `Retorno do servidor: ${planError}. Use o catálogo e o formato DAX permitido.` : ''
     input.onProgress?.(biProgress(exploration.length ? 2 : 1, exploration.length
       ? 'A IA está analisando os dados investigados e preparando as próximas consultas.' : 'A IA está lendo as regras do modelo e planejando as consultas desta pergunta.'))
-    const response = await conversar(config, [
+    const response = await conversarEtapa(config, 'planejamento', [
       { role: 'system', content: plannerSystem },
       { role: 'user', content: JSON.stringify({ dashboard: input.dashboard.name,
         context: plannerContext(), verifiedReportRules: plannerReferences() }) },
@@ -375,7 +463,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         catalogResults,
         feedback,
       }) },
-    ], { temperatura: 0, maxTokens: 'maximum', sessao: session,
+    ], { temperatura: 0, sessao: session,
       reasoningEffort: config.reasoningEffort, signal: input.signal, jsonObrigatorio: true,
       onActivity: modelActivity(exploration.length ? 2 : 1, 'A IA está analisando as regras para escolher as próximas consultas.', 'A IA está concluindo o plano das próximas consultas.') })
     plannerTokens += response.tokens
@@ -426,7 +514,10 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
           exploration.push(...results.map(result => ({ purpose: result.query.purpose, rows: result.rows, truncated: result.truncated })))
           explorationMeta.push(...results.map(result => ({ purpose: result.query.purpose, dax: result.query.dax, rowCount: result.rowCount,
             body: result.query.body, sourceMeasure: result.query.sourceMeasure, formats: result.query.formats })))
-          planError = 'Exploração executada. Analise as linhas reais e conclua ou investigue o que falta.'
+          // Measured: some questions wandered through 10–20 tiny explorations. After a few, ask for a conclusion.
+          planError = exploration.length >= 6
+            ? `Exploração executada (${exploration.length} consultas até aqui). Na maioria dos casos os dados já bastam: conclua agora com a consulta final ou answer-from-results; explore de novo só se faltar um dado indispensável.`
+            : 'Exploração executada. Analise as linhas reais e conclua ou investigue o que falta.'
         } catch (error) {
           if (!(error instanceof PowerBiQueryError) || error.code !== 'INVALID_DAX') throw error
           planError = `Exploração recusada pelo modelo: ${error.message.slice(0, 700)}. Corrija a consulta mantendo a intenção.`
@@ -459,16 +550,16 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   if (plan.clarification) {
     if (clarificationCount >= 2) {
       const answer = `Ainda falta contexto para consultar este BI com segurança: ${plan.clarification.question} Refaça a pergunta com esses detalhes.`
-      await saveTurn({ ...input, conversationId, message, answer, queries: [], provider: provider.id,
-        model: config.modelo, tokens: plannerTokens, started })
+      await save({ ...input, conversationId, message, answer, queries: [], provider: provider.id,
+        model: config.modelo, tokens: plannerTokens, started, cacheable: false })
       return { conversationId, answer, queries: [], assumptions: [] }
     }
     return ask(plan.clarification, message, clarificationCount + 1)
   }
   if (!plan.answerable) {
     const answer = 'Este BI não contém informações suficientes para responder com segurança. Tente uma pergunta sobre as medidas e dimensões deste relatório.'
-    await saveTurn({ ...input, conversationId, message, answer, queries: [], provider: provider.id,
-      model: config.modelo, tokens: plannerTokens, started })
+    await save({ ...input, conversationId, message, answer, queries: [], provider: provider.id,
+      model: config.modelo, tokens: plannerTokens, started, cacheable: false })
     return { conversationId, answer, queries: [], assumptions: [] }
   }
   if (plan.answerResults) {
@@ -507,7 +598,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       SOURCE_SECTION, `- **Fonte:** ${escapeMarkdown(input.dashboard.name)}, consultado no Power BI.`,
       ...selected.map(result => `- **Consulta:** ${escapeMarkdown(result.purpose)}`)].join('\n\n')
     input.onProgress?.(biProgress(3, 'Conferindo os registros e os valores já consultados antes de responder.'))
-    await saveTurn({ ...input, conversationId, message, answer, queries: explorationMeta, provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
+    await save({ ...input, conversationId, message, answer, queries: explorationMeta, provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
     return { conversationId, answer, queries: explorationMeta.map(({ purpose, rowCount }) => ({ purpose, rowCount })), assumptions: [], truncated: selected.some(result => result.truncated) }
   }
   if (plan.reportRequests && !checkpoint?.plan) return continueAnalysis(plan)
@@ -529,7 +620,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       ...groups, formatted.slice(formatted.indexOf(SOURCE_SECTION))].join('\n\n')
     const queries = [...explorationMeta, ...loaded.map(result => ({ purpose: `Indicadores em ${result.contract.measure}`, dax: result.dax, rowCount: 1 }))]
     input.onProgress?.(biProgress(3, 'Conferindo os valores com as fontes publicadas do relatório.'))
-    await saveTurn({ ...input, conversationId, message, answer, queries, provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
+    await save({ ...input, conversationId, message, answer, queries, provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
     return { conversationId, answer, queries: queries.map(({ purpose, rowCount }) => ({ purpose, rowCount })), assumptions: [], truncated: false,
       evidence: { modelHash: liveSchema!.modelHash, reportHash: liveSchema!.reportHash,
         scope: loaded[0].scope, values: facts.map(({ metricId, label, value, precision, scope }) => ({ metricId, label, value, precision, scope })) } }
@@ -550,7 +641,10 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     const pending = plan.queries.some(query => /\b(?:TOPN|SUM|SUMX|GROUPBY|SUMMARIZECOLUMNS|DISTINCTCOUNT|COUNTROWS|AVERAGE|MIN|MAX)\b/i.test(maskDax(query.dax)))
       || declaredSources.length > 0 || derivesResults
     const sourceBacked = preparedQueries.every(query => usesPublishedDataRule(query.variables))
-    if (pending && (sourceBacked || relevant.length)) {
+    // Queries built on the server-injected published rule need no second AI pass under 'risco';
+    // free DAX that re-implements a rule, or derives from earlier results, is still reviewed.
+    const reviewNeeded = !(reviewPolicy() === 'risco' && sourceBacked && !derivesResults)
+    if (reviewNeeded && pending && (sourceBacked || relevant.length)) {
       const sourceRules = sourceBacked ? preparedQueries.map(prepared => {
         const source = executionContext().semanticSources!.find(source => source.measure === prepared.sourceMeasure)!
         const fields = sourceTableFields(source), used = new Set(prepared.variables.map(variable => variable.name))
@@ -568,7 +662,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       const sources = ordered.filter((source, index) => { const bytes = JSON.stringify(source).length;
         if (index && !inspectedObjects.has(source.measure) && size + bytes > 42_000) return false; size += bytes; return true })
       input.onProgress?.(biProgress(2, 'Conferindo as regras do relatório antes de executar as consultas.'))
-      const review = await conversar(config, [
+      const review = await conversarEtapa(config, 'revisao', [
         { role: 'system', content: `Revise o plano DAX antes de executar. Retorne somente JSON. A pergunta é o objetivo; as regras são a definição atual do modelo publicado. Confira se CADA consulta responde ao pedido, preserva status, data do evento, chaves, deduplicação, grão, filtros, arredondamento por registro e ordenação. SUM(Valor) com ROUND só no final pode diferir de SUMX(tabela, ROUND(Valor, 2)) usado no visual. Use a expressão publicada para o indicador; outro recorte explicitamente pedido é válido e deve ser declarado. Uma medida auxiliar de nome parecido não redefine a fórmula do visual. missingTables indica dependência quebrada. Uma medida HTML é apresentação. Variáveis escalares não são reavaliadas ao mudar filtros; a expressão deve estar dentro do contexto do período. Em iteradores, filtros explícitos não podem apagar a dimensão que está sendo comparada. Projeção precisa de método e horizonte explícitos, inclui o restante do mês corrente ou projeta desde o último mês fechado sem contar o parcial novamente; gap sozinho não é previsão. Não acrescente novos cenários, consultas ou métricas por iniciativa própria. Se o plano já é adequado, retorne SOMENTE {"approved":true}, sem repetir ou reescrever o plano. Se houver erro concreto, retorne {"approved":false,"issues":[{"queryIndex":0,"reason":"problema encontrado"}],"queries":[todas as consultas originais, corrigindo apenas as identificadas],"assumptions":[]}. Preserve a quantidade, o objetivo, explanation e formats; se mudar uma regra ou método, ajuste também a explicação. Percentuais em formats têm type percent e percentScale ratio ou points conforme o DAX. Não peça esclarecimento sobre informação já disponível.` },
         { role: 'user', content: JSON.stringify({ question: message, plan,
           context: sourceBacked ? undefined : plannerContext(),
@@ -576,7 +670,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
           nativeInputs: nativeMeasureRules([expressions, ...(derivesResults ? explorationMeta.map(query => query.body ?? query.dax) : []),
             ...(sourceRules ?? sources).flatMap(source => source.variables.map(variable => variable.expression))], liveSchema, input.manifest),
           publishedRules: sourceRules ?? sources, visualIndicators: plannerReportReferences(currentReportRules, [...new Set((sourceRules ?? sources).map(source => source.measure))]) }) },
-      ], { temperatura: 0, maxTokens: 'maximum', sessao: session, reasoningEffort: config.reasoningEffort, jsonObrigatorio: true, signal: input.signal,
+      ], { temperatura: 0, sessao: session, reasoningEffort: config.reasoningEffort, jsonObrigatorio: true, signal: input.signal,
         onActivity: modelActivity(2, 'A IA está conferindo os filtros e cálculos com as fórmulas publicadas.', 'A conferência das regras está sendo concluída.') })
       plannerTokens += review.tokens
       try {
@@ -594,11 +688,11 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     let rejectedDax = failed.dax
     let reason = cause.message.slice(0, 350)
     for (let attempt = 0; attempt < 2; attempt++) {
-      const response = await conversar(config, [
+      const response = await conversarEtapa(config, 'correcao', [
         { role: 'system', content: `${plannerSystem}\nEsta consulta foi recusada pelo Power BI. Retorne uma consulta final corrigida, preservando intenção e filtros. Se a medida depender de uma tabela inexistente, use a regra ou fonte válida do próprio visual publicado, e não outra métrica. Pode declarar sourceMeasure para usar as variáveis da definição publicada. Não repita a consulta ou medida que falhou.` },
         { role: 'user', content: JSON.stringify({ question: message, context: plannerContext(), rejectedDax,
           powerBiError: reason, previousQueries: plan!.queries.filter(query => query !== failed).map(query => query.purpose) }) },
-      ], { temperatura: 0, maxTokens: 'maximum', sessao: session,
+      ], { temperatura: 0, sessao: session,
         reasoningEffort: config.reasoningEffort, signal: input.signal, jsonObrigatorio: true,
         onActivity: modelActivity(2, 'A IA está corrigindo a consulta com o retorno do Power BI.', 'A correção da consulta está sendo concluída.') })
       plannerTokens += response.tokens
@@ -645,7 +739,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   const semConsulta = plan.queries.length === 0
   if (!semConsulta && queryResults.every((result) => result.rows.length === 0)) {
     const answer = 'O modelo semântico não retornou dados para esta pergunta e os filtros informados.'
-    await saveTurn({ ...input, conversationId, message, answer, queries: queryMeta,
+    await save({ ...input, conversationId, message, answer, queries: queryMeta,
       provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
     return { conversationId, answer, queries: queryMeta.map(({ purpose, rowCount }) => ({ purpose, rowCount })), assumptions: plan.assumptions }
   }
@@ -666,7 +760,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       ...(refresh?.status === 'Failed' ? ['> ⚠️ A última atualização falhou. Estes são os dados disponíveis no modelo Power BI.'] : []),
       SOURCE_SECTION, `- **Fonte:** ${escapeMarkdown(input.dashboard.name)}, consultado no Power BI.`,
       ...notes.map(note => `- ${escapeMarkdown(note)}`)].join('\n\n')
-    await saveTurn({ ...input, conversationId, message, answer, queries: queryMeta,
+    await save({ ...input, conversationId, message, answer, queries: queryMeta,
       provider: provider.id, model: config.modelo, tokens: plannerTokens, started })
     return { conversationId, answer, queries: queryMeta.map(({ purpose, rowCount }) => ({ purpose, rowCount })),
       assumptions: plan.assumptions, truncated: queryResults.some(result => result.truncated) }
@@ -690,13 +784,13 @@ Comece com um parágrafo curto que explique o indicador ou a regra em linguagem 
   let answer = ''
   let tokens = plannerTokens
   for (let attempt = 0; attempt < 2; attempt++) {
-    const response = await conversar(config, [
+    const response = await conversarEtapa(config, 'explicacao', [
       { role: 'system', content: explainerSystem },
       { role: 'user', content: JSON.stringify({ question: message, dashboard: input.dashboard.name,
         results: dataForAnswer, assumptions: plan.assumptions, reference,
         correction: attempt ? 'A resposta anterior incluiu um número ausente dos dados. Reescreva usando somente números das linhas.' : undefined }) },
-    ], { temperatura: 0, maxTokens: 'maximum', sessao: session,
-      reasoningEffort: config.reasoningEffort, signal: input.signal, jsonObrigatorio: true,
+    ], { temperatura: 0, sessao: session,
+      reasoningEffort: explainerEffort(config), signal: input.signal, jsonObrigatorio: true,
       onActivity: modelActivity(3, 'A IA está organizando a explicação das regras do relatório.', 'A explicação do relatório está sendo concluída.') })
     tokens += response.tokens
     try {
@@ -719,7 +813,7 @@ Comece com um parágrafo curto que explique o indicador ou a regra em linguagem 
     const nota = notaDeEscopo(message, context)
     if (nota) answer = `${answer}\n\n${nota}`
   }
-  await saveTurn({ ...input, conversationId, message, answer, queries: queryMeta,
+  await save({ ...input, conversationId, message, answer, queries: queryMeta,
     provider: provider.id, model: config.modelo, tokens, started })
   return {
     conversationId, answer,

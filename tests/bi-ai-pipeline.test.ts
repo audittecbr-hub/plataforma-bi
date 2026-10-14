@@ -6,7 +6,7 @@ import { parseManifest } from '../src/lib/bi-ai/manifest'
 
 test('parallel BI pipeline preserves verification, auditing and failure handling', async () => {
   const originalFetch = globalThis.fetch
-  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://pipeline-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key-long-enough-for-analysis',
+  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://pipeline-test.supabase.co', BI_AI_PERSISTENT_CACHE: 'off', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key-long-enough-for-analysis',
     OPENCODE_API_KEY: 'test-provider-key', POWERBI_TENANT: 'test-tenant', POWERBI_CLIENT_ID: 'test-client', POWERBI_CLIENT_SECRET: 'test-secret' }
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
   Object.assign(process.env, env)
@@ -47,9 +47,11 @@ test('parallel BI pipeline preserves verification, auditing and failure handling
         if (url.endsWith('/models')) return json({ data: [{ id: 'deepseek-v4.1-flash', max_output_tokens: 393216 }] })
         if (url.endsWith('/chat/completions')) {
           const body = JSON.parse(String(init?.body))
-          assert.equal(body.reasoning_effort, 'max')
-          assert.equal(body.max_tokens, 393216)
           const planner = body.messages[0].content.startsWith('Planeje DAX')
+          // Planning keeps the administrator's effort under a bounded ceiling; wording verified rows needs little reasoning.
+          assert.equal(body.reasoning_effort, planner ? 'max' : undefined)
+          assert.equal(body.thinking.type, planner ? 'enabled' : 'disabled')
+          assert.equal(body.max_tokens, planner ? 32000 : 12000)
           if (planner) {
             assert.equal(body.messages.length, 3)
             assert(JSON.parse(body.messages[1].content).context.measures.some((m: { name: string }) => m.name === 'Receita'))

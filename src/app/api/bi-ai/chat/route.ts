@@ -9,6 +9,11 @@ import type { BiProgressReporter } from '@/lib/bi-ai/progress'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
+// Power BI (Brazil South) and Supabase (sa-east-1) are in São Paulo; every model read crosses less network.
+export const preferredRegion = 'gru1'
+
+/** Keep investigating inside one request for up to this long before handing a continuation to the browser. */
+const IN_REQUEST_ANALYSIS_MS = 120_000
 
 export async function POST(request: Request): Promise<Response> {
   return withAiRequestCache(() => answerRequest(request))
@@ -30,13 +35,14 @@ async function answerRequest(request: Request): Promise<Response> {
     }
     const { user, profile, dashboard } = await authorizedDashboard(body.dashboardId)
     const answer = async (onProgress?: BiProgressReporter, signal = request.signal) => {
-      const [manifest] = await Promise.all([manifestForDashboard(dashboard, !body.continuationToken), lerConfigIa()])
+      const [manifest] = await Promise.all([manifestForDashboard(dashboard, false), lerConfigIa()])
       return answerBiQuestion({
       dashboard, manifest, userId: user.id, isAdmin: profile?.is_admin === true,
       conversationId: typeof body.conversationId === 'string' ? body.conversationId : null, message: body.message as string,
       clarificationToken: typeof body.clarificationToken === 'string' ? body.clarificationToken : null,
       continuationToken: typeof body.continuationToken === 'string' ? body.continuationToken : null,
       yieldAnalysis: request.headers.get('x-bi-ai-continuation') === '1',
+      yieldAfterMs: IN_REQUEST_ANALYSIS_MS,
       signal, onProgress,
       })
     }

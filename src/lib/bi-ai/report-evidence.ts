@@ -15,7 +15,7 @@ export interface ReportMetricReference {
 }
 
 export interface ReportReferenceContract {
-  version: 1; modelHash: string; reportHash?: string; measure: string; page: string
+  version: 1; modelHash: string; semanticHash?: string; reportHash?: string; measure: string; page: string
   source: { kind: 'delimited-html' | 'static-html'; elementId?: string; productDictionaryId?: string;
     fields?: Record<string, string[]>; textFields?: string[]; regionCodes?: Record<string, string>;
     regionLabels?: Record<string, string>; currentMonthVariable?: string; timeField?: string; groupField?: string }
@@ -50,7 +50,9 @@ export function validateReportReferences(manifest: BiManifest, schema: Published
   if (!Array.isArray(value) || value.length > 30) throw new ReportEvidenceError('Referências do relatório inválidas.')
   return value.map(raw => {
     const c = raw as ReportReferenceContract
-    if (!c || c.version !== 1 || c.modelHash !== schema.modelHash || schema.reportHash && c.reportHash !== schema.reportHash
+    // A source-only republication keeps the semantic hash; any measure, column or relationship change does not.
+    const sameModel = !!c && (c.modelHash === schema.modelHash || typeof c.semanticHash === 'string' && c.semanticHash === schema.semanticHash)
+    if (!c || c.version !== 1 || !sameModel || schema.reportHash && c.reportHash !== schema.reportHash
       || !['delimited-html', 'static-html'].includes(c.source?.kind)
       || !boundedText(c.measure, 200) || !boundedText(c.page, 200)
       || !Array.isArray(c.notes) || c.notes.length > 30 || c.notes.some(note => !boundedText(note, 2_000))

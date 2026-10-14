@@ -2,6 +2,7 @@ import 'server-only'
 
 import { executeDaxQuery } from '@/lib/powerbi'
 import { UUID, safeMetadataText, safeText } from './manifest'
+import { liveAndStore, snapshotOrLive } from './snapshot-store'
 import type { PublishedSchema } from './fabric-schema'
 import type { DashboardRow } from './access'
 
@@ -102,12 +103,19 @@ async function load(workspaceId: string, semanticModelId: string, signal?: Abort
   }
 }
 
-/** Catálogo do modelo publicado, cacheado por instância de servidor. */
+/**
+ * Catálogo do modelo publicado: perguntas leem o retrato sincronizado (revalidado em segundo
+ * plano a cada 15 min); `forceFresh` lê ao vivo e atualiza o retrato. Cache por instância em cima.
+ */
 export function liveCatalog(workspaceId: string, semanticModelId: string, signal?: AbortSignal, forceFresh = false): Promise<LiveCatalog> {
   const key = `${workspaceId}:${semanticModelId}`
   const cached = cache.get(key)
   if (!forceFresh && cached && cached.expiresAt > Date.now()) return cached.promise
-  const promise = load(workspaceId, semanticModelId, signal)
+  const path = `snapshots/catalog/${key.replaceAll(':', '_')}.json.gz`
+  // A revalidação em segundo plano não pode herdar o cancelamento da pergunta.
+  const live = (abort?: AbortSignal) => () => load(workspaceId, semanticModelId, abort)
+  const promise = forceFresh ? liveAndStore(path, live(signal))
+    : snapshotOrLive(path, live(), (value) => cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(value) }))
   cache.set(key, { expiresAt: Date.now() + CACHE_MS, promise })
   promise.catch(() => { if (cache.get(key)?.promise === promise) cache.delete(key) })
   return promise
