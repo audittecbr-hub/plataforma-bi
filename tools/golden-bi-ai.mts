@@ -78,9 +78,11 @@ interface Chamada {
   cachedTokens?: number
   saidaTokens?: number
   raciocinioTokens?: number
+  /** Início do texto devolvido (o JSON do plano), para ver a ação escolhida em cada etapa. */
+  saida?: string
 }
 
-interface Rastro { chamadas: Chamada[]; pendentes: Promise<unknown>[]; dax: { ms: number; linhas: number; status: string }[] }
+interface Rastro { chamadas: Chamada[]; pendentes: Promise<unknown>[]; dax: { ms: number; linhas: number; status: string; consulta: string }[] }
 
 const rastro = new AsyncLocalStorage<Rastro>()
 
@@ -101,7 +103,8 @@ function tipoDaUrl(url: string): Chamada['tipo'] {
 function etapaDoPrompt(sistema: string): string {
   if (sistema.startsWith('Revise o plano DAX')) return 'revisao'
   if (sistema.includes('foi recusada pelo Power BI')) return 'correcao'
-  if (sistema.startsWith('Planeje DAX')) return 'planejamento'
+  // Com a tabela IA, a orientação dela vem antes das instruções do planejador.
+  if (sistema.startsWith('Planeje DAX') || sistema.includes('\nPlaneje DAX')) return 'planejamento'
   if (sistema.startsWith('Explique em português')) return 'explicacao'
   return sistema.slice(0, 40)
 }
@@ -140,9 +143,15 @@ globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => 
     atual.pendentes.push((ct.includes('event-stream') ? copia.text().then(texto => {
       for (const linha of texto.split('\n')) {
         if (!linha.startsWith('data: {')) continue
-        try { const pedaco = JSON.parse(linha.slice(6)); if (pedaco.usage) uso(pedaco.usage) } catch { /* linha parcial */ }
+        try {
+          const pedaco = JSON.parse(linha.slice(6))
+          if (pedaco.usage) uso(pedaco.usage)
+          const texto = pedaco.choices?.[0]?.delta?.content
+          if (typeof texto === 'string' && (chamada.saida ?? '').length < 400) chamada.saida = ((chamada.saida ?? '') + texto).slice(0, 400)
+        } catch { /* linha parcial */ }
       }
-    }) : copia.json().then(j => uso(j.usage))).catch(() => {}).finally(() => { chamada.ms = performance.now() - inicio }))
+    }) : copia.json().then(j => { uso(j.usage); const texto = j.choices?.[0]?.message?.content; if (typeof texto === 'string') chamada.saida = texto.slice(0, 400) }))
+      .catch(() => {}).finally(() => { chamada.ms = performance.now() - inicio }))
   }
   return resposta
 }
@@ -249,10 +258,19 @@ function avaliar(caso: Caso, resultado: Record<string, unknown>, linhas: Record<
       corte = linhas.filter((l, i) => i < n || l.valor === limite)
     }
     const corpo = normalizar(texto)
+    const nomes = corte.map(l => normalizar(String(l.entidade ?? l.chave ?? '')))
+    // "PIS/COFINS" também aparece dentro de "VERMELHO - PIS/COFINS": ignore ocorrências dentro de outra entidade da lista.
+    const ocorrencia = (nome: string) => {
+      const maiores = nomes.filter(outro => outro !== nome && outro.includes(nome))
+      for (let i = corpo.indexOf(nome); i >= 0; i = corpo.indexOf(nome, i + 1)) {
+        if (!maiores.some(outro => { const j = corpo.lastIndexOf(outro, i + nome.length); return j >= 0 && j <= i && j + outro.length >= i + nome.length })) return i
+      }
+      return -1
+    }
     let posicao = -1
     for (const l of corte) {
       const nome = String(l.entidade ?? l.chave ?? '')
-      const onde = corpo.indexOf(normalizar(nome))
+      const onde = ocorrencia(normalizar(nome))
       if (onde < 0) { ok = false; detalhes.push(`entidade ausente: ${nome}`); continue }
       if (esperado.tipo === 'ranking' && onde < posicao) { ok = false; detalhes.push(`ordem trocada em ${nome}`) }
       posicao = Math.max(posicao, onde)
@@ -319,7 +337,8 @@ async function main() {
           memoria.set(turno.conversationId, [...(memoria.get(turno.conversationId) ?? []),
             { question: turno.question, answer: turno.answer.slice(0, 1200) }])
         },
-        recordQueryLog: async entrada => { rastro.getStore()?.dax.push({ ms: entrada.durationMs, linhas: entrada.rowCount, status: entrada.status }) },
+        recordQueryLog: async entrada => { rastro.getStore()?.dax.push({ ms: entrada.durationMs, linhas: entrada.rowCount, status: entrada.status,
+          consulta: entrada.dax.slice(0, 4000) }) },
       },
     }))
     return { resultado: resultado as Record<string, unknown>, tokens: tokens.total }

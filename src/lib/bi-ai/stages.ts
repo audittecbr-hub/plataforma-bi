@@ -38,6 +38,21 @@ export async function conversarEtapa(config: ConfigIa, etapa: Stage, mensagens: 
  */
 export function explainerEffort(config: ConfigIa): ConfigIa['reasoningEffort'] {
   if (!deepSeekThinkingModel(config.provedorId, config.modelo)) return config.reasoningEffort
-  const chosen = process.env.BI_AI_EXPLAINER_EFFORT
-  return chosen === 'none' || chosen === 'low' || chosen === 'medium' || chosen === 'high' || chosen === 'max' ? chosen : 'none'
+  return effortFromEnv(process.env.BI_AI_EXPLAINER_EFFORT) ?? 'none'
+}
+
+/**
+ * With the certified IA table, planning is picking a measure, its cuts and the period: long
+ * reasoning only adds latency there. Measured on 29 Regionais questions (14/10/2026): low kept
+ * 29/29 correct with median 8 s and p90 20 s; high also 29/29 with median 15 s and p90 50 s;
+ * none was faster but missed 3 of 29. Review and repair of those plans use the same level (one review reasoned
+ * 11k tokens for 80 s at high). Models without the table keep the administrator's choice.
+ */
+export function plannerEffort(config: ConfigIa, certified: boolean): ConfigIa['reasoningEffort'] {
+  if (!certified || !deepSeekThinkingModel(config.provedorId, config.modelo)) return config.reasoningEffort
+  return effortFromEnv(process.env.BI_AI_CERTIFIED_PLANNER_EFFORT) ?? 'low'
+}
+
+function effortFromEnv(chosen: string | undefined): ConfigIa['reasoningEffort'] | null {
+  return chosen === 'none' || chosen === 'low' || chosen === 'medium' || chosen === 'high' || chosen === 'max' ? chosen : null
 }

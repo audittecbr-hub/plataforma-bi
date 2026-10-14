@@ -1,3 +1,4 @@
+import { certifiedDimensions, certifiedMeasures, IA_TABLE, isCertifiedDimension } from './ia-table'
 import { asRecord, safeText, type BiManifest, type BiObject, type BiTable } from './manifest'
 import { validateDax } from './dax-guard'
 import type { DaxSemanticSource } from './dax-source'
@@ -92,10 +93,10 @@ export function compactContextForPlanner(context: SelectedContext, inspected: st
     availableDimensions: context.availableDimensions,
     availableTables: context.availableTables,
     tables: context.tables.map((table) => ({ name: table.name, fact: table.fact,
-      description: table.description.slice(0, requested.has(normalizeTerm(table.name)) ? 1500 : 180) })),
+      description: table.description.slice(0, requested.has(normalizeTerm(table.name)) ? 1500 : isCertifiedDimension(table.name) ? 600 : 180) })),
     measures: context.measures.map((measure) => ({
       name: measure.name, table: measure.table,
-      description: measure.description.slice(0, expanded(measure.table, measure.name) ? 2500 : 360),
+      description: measure.description.slice(0, measure.table === IA_TABLE || expanded(measure.table, measure.name) ? 2500 : 360),
       intent: measure.intent?.slice(0, 140), whenToUse: measure.whenToUse?.slice(0, 160),
       whenNotToUse: measure.whenNotToUse?.slice(0, 160),
       publishedExpression: expanded(measure.table, measure.name)
@@ -103,7 +104,7 @@ export function compactContextForPlanner(context: SelectedContext, inspected: st
       format: measure.format,
     })),
     columns: context.columns.map((column) => ({ name: column.name, table: column.table,
-      description: column.description.slice(0, expanded(column.table, column.name) ? 1200 : 100),
+      description: column.description.slice(0, expanded(column.table, column.name) ? 1200 : isCertifiedDimension(column.table) ? 700 : 100),
       dataType: column.dataType, aggregatable: column.aggregatable })),
     relationships: context.relationships.slice(0, 8),
     reportMap: context.reportMap.slice(0, 8).map((page) => page.slice(0, 200)),
@@ -234,9 +235,23 @@ export function selectContext(manifest: BiManifest, question: string, isAdmin: b
     if (dependencies.has(normalizeTerm(measure.name)) && measure.queryable && !measure.presentationOnly
       && (allowRestricted || !measure.restricted) && !measures.includes(measure)) measures.push(measure)
   }
+  // A tabela IA (medidas certificadas) entra inteira e na frente: é o caminho preferido para os indicadores publicados.
+  const certified = certifiedMeasures(manifest).filter((measure) => allowRestricted || !measure.restricted)
+  for (const measure of [...certified].reverse()) {
+    const index = measures.indexOf(measure)
+    if (index >= 0) measures.splice(index, 1)
+    measures.unshift(measure)
+  }
   const allColumns = queryable.flatMap((table) => table.columns)
     .filter((column) => column.queryable && (allowRestricted || !column.restricted))
   const columns = selected(allColumns, terms, 12)
+  if (certified.length) {
+    for (const column of [...certifiedDimensions(manifest)].reverse()) {
+      const index = columns.indexOf(column)
+      if (index >= 0) columns.splice(index, 1)
+      columns.unshift(column)
+    }
+  }
   for (const column of allColumns) {
     if (columns.length >= 18) break
     const qualified = normalizeTerm(`${column.table} ${column.name}`)
@@ -325,8 +340,8 @@ export function selectContext(manifest: BiManifest, question: string, isAdmin: b
     else if (context.availableMeasures.length) context.availableMeasures.pop()
     else if (context.examples.length) context.examples.pop()
     else if (context.ambiguities.length) context.ambiguities.pop()
-    else if (context.columns.length > 2) context.columns.pop()
-    else if (context.measures.length > 2) context.measures.pop()
+    else if (context.columns.length > Math.max(2, certifiedDimensions(manifest).length)) context.columns.pop()
+    else if (context.measures.length > Math.max(2, certified.length)) context.measures.pop()
     else if (context.reportMap.length > 3) context.reportMap.pop()
     else break
   }

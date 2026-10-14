@@ -129,7 +129,7 @@ export function getFabricAccessToken(): Promise<string> {
 
 export type PowerBiErrorCode = 'ENTRA_MISSING' | 'ENTRA_TOKEN' | 'WORKSPACE_ACCESS'
     | 'MODEL_NOT_FOUND' | 'BUILD_READ' | 'EXECUTE_QUERIES_DISABLED'
-    | 'RLS_SSO' | 'MODEL_INCOMPATIBLE' | 'INVALID_DAX' | 'TIMEOUT' | 'POWERBI_ERROR'
+    | 'RLS_SSO' | 'MODEL_INCOMPATIBLE' | 'INVALID_DAX' | 'TIMEOUT' | 'RATE_LIMITED' | 'POWERBI_ERROR'
 
 export class PowerBiQueryError extends Error {
     constructor(readonly code: PowerBiErrorCode, readonly httpStatus: number | null, detail: string) {
@@ -146,9 +146,18 @@ function classifyQueryError(status: number, detail: string): PowerBiErrorCode {
     if (/build permission|read permission|datasetread/.test(text)) return 'BUILD_READ'
     if (/dax query failure|syntax error|could not be found|cannot find (table|column|measure)|n[aã]o [eé] poss[ií]vel localizar (?:a tabela|a coluna|a medida)|calculation error in measure/.test(text)) return 'INVALID_DAX'
     if (status === 400 && /datasetexecutequerieserror|function .* expects|query \(\d+, \d+\)/.test(text)) return 'INVALID_DAX'
+    if (status === 429) return 'RATE_LIMITED'
     if (status === 404) return 'MODEL_NOT_FOUND'
     if (status === 401 || status === 403) return 'WORKSPACE_ACCESS'
     return 'POWERBI_ERROR'
+}
+
+function esperar(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(signal.reason)
+        const timer = setTimeout(resolve, ms)
+        signal?.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason) }, { once: true })
+    })
 }
 
 /** JSON Execute Queries adapter. The dashboard's workspace/model IDs are resolved server-side. */
@@ -171,20 +180,28 @@ export async function executeDaxQuery({
         )
     }
     let response: Response
-    try {
-        response = await fetch(
-            `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/datasets/${semanticModelId}/executeQueries`,
-            {
-                method: 'POST',
-                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ queries: [{ query: dax }], serializerSettings: { includeNulls: true } }),
-                signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000),
-            },
-        )
-    } catch (error) {
-        const detail = error instanceof Error ? error.message : String(error)
-        console.error('[powerbi] executeQueries network:', detail)
-        throw new PowerBiQueryError('TIMEOUT', null, detail)
+    // executeQueries allows 120 calls per minute per identity, shared by every chat. A burst answers 429 with
+    // the seconds to wait: wait (bounded) and retry instead of failing the user's question.
+    for (let tentativa = 0; ; tentativa++) {
+        try {
+            response = await fetch(
+                `https://api.powerbi.com/v1.0/myorg/groups/${workspaceId}/datasets/${semanticModelId}/executeQueries`,
+                {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ queries: [{ query: dax }], serializerSettings: { includeNulls: true } }),
+                    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000),
+                },
+            )
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : String(error)
+            console.error('[powerbi] executeQueries network:', detail)
+            throw new PowerBiQueryError('TIMEOUT', null, detail)
+        }
+        if (response.status !== 429 || tentativa >= 2) break
+        const pedido = Number(response.headers.get('retry-after')) || Number(/retry in (\d+)/i.exec(await response.text())?.[1]) || 5
+        console.warn(`[powerbi] executeQueries 429: nova tentativa em ${Math.min(pedido, 30)} s`)
+        await esperar(Math.min(pedido, 30) * 1000, signal)
     }
     const body = await response.text()
     if (body.length > 2_000_000) {
@@ -224,6 +241,7 @@ export function powerBiUserMessage(error: unknown): string {
         case 'MODEL_INCOMPATIBLE': return 'Este modelo semântico não é compatível com Execute Queries.'
         case 'INVALID_DAX': return 'A consulta DAX foi recusada pelo modelo.'
         case 'TIMEOUT': return 'A consulta ao Power BI excedeu o tempo limite.'
+        case 'RATE_LIMITED': return 'O Power BI está recebendo muitas consultas agora. Tente novamente em um minuto.'
         default: return 'A consulta ao Power BI falhou. Avise o administrador.'
     }
 }
