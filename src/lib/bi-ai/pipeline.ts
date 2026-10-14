@@ -29,7 +29,8 @@ import { publishedSchema } from './fabric-context'
 import { readStored, writeStored } from './snapshot-store'
 import { inBackground } from './background'
 import { markCached, recordDax, telemetrySnapshot, withBiTelemetry } from './telemetry'
-import { conversarEtapa, explainerEffort } from './stages'
+import { conversarEtapa, explainerEffort, plannerEffort } from './stages'
+import { CERTIFIED_INSTRUCTIONS, certifiedMeasures, certifiedOnly } from './ia-table'
 import { PublishedSchemaError, withPublishedSchema, type PublishedSchema } from './fabric-schema'
 import { clarificationKey, ClarificationError,
   continueClarification, issueClarificationToken, readClarificationToken,
@@ -364,14 +365,16 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   }
   const executionContext = () => ({ ...context, semanticSources: context.semanticSources?.map(source =>
     liveSchema?.measures.find(measure => measure.name === source.measure)?.semanticSource ?? source) })
-  if (!checkpoint) {
+  // With certified measures, the visual's HTML program is not loaded up front: the IA table already carries its rules.
+  const hasCertified = certifiedMeasures(input.manifest).length > 0
+  if (!checkpoint && !hasCertified) {
     const source = rankSemanticSources(executionContext().semanticSources ?? [], message, currentReportRules)[0]
     if (source) inspectedObjects.add(`${source.measure}::auto`)
   }
   const plannerContext = () => focusedPlannerContext(context, input.manifest, message,
     executionContext().semanticSources ?? [], [...inspectedObjects], currentReportRules)
   const plannerReferences = () => plannerReportReferences(currentReportRules, [...inspectedObjects].map(name => name.split('::')[0]))
-  const plannerSystem = PLANNER_INSTRUCTIONS
+  const plannerSystem = hasCertified ? `${PLANNER_INSTRUCTIONS}\n${CERTIFIED_INSTRUCTIONS}` : PLANNER_INSTRUCTIONS
   if (checkpoint && liveSchema) context.semanticSources = context.semanticSources?.map(source => inspectedObjects.has(source.measure)
     ? structuredClone(liveSchema!.measures.find(measure => measure.name === source.measure)!.semanticSource!) : source)
   let plan: QueryPlan | undefined = checkpoint?.plan
@@ -464,7 +467,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         feedback,
       }) },
     ], { temperatura: 0, sessao: session,
-      reasoningEffort: config.reasoningEffort, signal: input.signal, jsonObrigatorio: true,
+      reasoningEffort: plannerEffort(config, hasCertified), signal: input.signal, jsonObrigatorio: true,
       onActivity: modelActivity(exploration.length ? 2 : 1, 'A IA está analisando as regras para escolher as próximas consultas.', 'A IA está concluindo o plano das próximas consultas.') })
     plannerTokens += response.tokens
     try {
@@ -484,7 +487,13 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
       }
       if (candidate.reportRequests && candidate.reportExploratory) {
         input.onProgress?.(biProgress(2, 'Consultando os valores dos indicadores nos próprios visuais publicados.'))
-        const loaded = await loadRequestedReportFacts(candidate.reportRequests)
+        let loaded: Awaited<ReturnType<typeof loadRequestedReportFacts>>
+        try { loaded = await loadRequestedReportFacts(candidate.reportRequests) }
+        catch (error) {
+          if (!(error instanceof ReportEvidenceError)) throw error
+          planError = `O visual não aceita esse recorte (${error.message}). Consulte as medidas do modelo com DAX.`
+          return continueAnalysis()
+        }
         exploration.push(...loaded.map(result => ({ purpose: `KPIs de ${result.contract.measure}`, rows: result.facts.map(fact => ({
           metric: fact.metricId, label: fact.label, value: fact.value, scope: fact.scope, format: fact.format })), truncated: false })))
         explorationMeta.push(...loaded.map(result => ({ purpose: `KPIs de ${result.contract.measure}`, dax: result.dax, rowCount: 1 })))
@@ -604,7 +613,14 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
   if (plan.reportRequests && !checkpoint?.plan) return continueAnalysis(plan)
   if (plan.reportRequests) {
     input.onProgress?.(biProgress(2, 'Consultando os indicadores solicitados na fonte publicada do BI.'))
-    const loaded = await loadRequestedReportFacts(plan.reportRequests)
+    let loaded: Awaited<ReturnType<typeof loadRequestedReportFacts>>
+    try { loaded = await loadRequestedReportFacts(plan.reportRequests) }
+    catch (error) {
+      // A visual reads only the cuts it publishes; any other cut goes back to the planner, which can use DAX.
+      if (!(error instanceof ReportEvidenceError)) throw error
+      planError = `O visual não aceita esse recorte (${error.message}). Consulte as medidas do modelo com DAX.`
+      return continueAnalysis()
+    }
     const refresh = await verifyCurrentData()
     const counts = new Map<string, number>()
     loaded.flatMap(result => result.facts).forEach(fact => counts.set(fact.label, (counts.get(fact.label) ?? 0) + 1))
@@ -643,7 +659,8 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
     const sourceBacked = preparedQueries.every(query => usesPublishedDataRule(query.variables))
     // Queries built on the server-injected published rule need no second AI pass under 'risco';
     // free DAX that re-implements a rule, or derives from earlier results, is still reviewed.
-    const reviewNeeded = !(reviewPolicy() === 'risco' && sourceBacked && !derivesResults)
+    const certifiedPlan = hasCertified && plan.queries.every(query => certifiedOnly(query.dax, input.manifest))
+    const reviewNeeded = !(reviewPolicy() === 'risco' && (sourceBacked || certifiedPlan) && !derivesResults)
     if (reviewNeeded && pending && (sourceBacked || relevant.length)) {
       const sourceRules = sourceBacked ? preparedQueries.map(prepared => {
         const source = executionContext().semanticSources!.find(source => source.measure === prepared.sourceMeasure)!
@@ -670,7 +687,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
           nativeInputs: nativeMeasureRules([expressions, ...(derivesResults ? explorationMeta.map(query => query.body ?? query.dax) : []),
             ...(sourceRules ?? sources).flatMap(source => source.variables.map(variable => variable.expression))], liveSchema, input.manifest),
           publishedRules: sourceRules ?? sources, visualIndicators: plannerReportReferences(currentReportRules, [...new Set((sourceRules ?? sources).map(source => source.measure))]) }) },
-      ], { temperatura: 0, sessao: session, reasoningEffort: config.reasoningEffort, jsonObrigatorio: true, signal: input.signal,
+      ], { temperatura: 0, sessao: session, reasoningEffort: plannerEffort(config, hasCertified), jsonObrigatorio: true, signal: input.signal,
         onActivity: modelActivity(2, 'A IA está conferindo os filtros e cálculos com as fórmulas publicadas.', 'A conferência das regras está sendo concluída.') })
       plannerTokens += review.tokens
       try {
@@ -693,7 +710,7 @@ async function answerBiQuestionStep(input: BiQuestionInput) {
         { role: 'user', content: JSON.stringify({ question: message, context: plannerContext(), rejectedDax,
           powerBiError: reason, previousQueries: plan!.queries.filter(query => query !== failed).map(query => query.purpose) }) },
       ], { temperatura: 0, sessao: session,
-        reasoningEffort: config.reasoningEffort, signal: input.signal, jsonObrigatorio: true,
+        reasoningEffort: plannerEffort(config, hasCertified), signal: input.signal, jsonObrigatorio: true,
         onActivity: modelActivity(2, 'A IA está corrigindo a consulta com o retorno do Power BI.', 'A correção da consulta está sendo concluída.') })
       plannerTokens += response.tokens
       let candidate: PlannedQuery

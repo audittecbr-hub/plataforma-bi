@@ -15,8 +15,9 @@ export interface PublishedPageMap {
 export interface PublishedSchema {
   modelHash: string
   /**
-   * Same as modelHash without the Power Query source of import partitions: republishing a model
-   * only to point it at another database or file keeps every measure and visual contract valid.
+   * Same as modelHash without the Power Query source of import partitions and without descriptions:
+   * republishing a model only to point it at another database or file, or to document it, keeps every
+   * measure and visual contract valid.
    */
   semanticHash?: string
   reportHash?: string
@@ -147,6 +148,11 @@ function tmdlDescription(text: string, max = 4000): string {
   return doc.join('\n').trim().slice(0, max)
 }
 
+/** Descriptions (/// lines) document the model; editing them changes no value, so contracts stay valid. */
+export function withoutDescriptions(text: string): string {
+  return text.split('\n').filter(line => !/^\s*\/\/\//.test(line)).join('\n')
+}
+
 /** Parse only semantic metadata. Never pass partitions, M queries or connections to the LLM. */
 /** Removes import (Power Query) partitions; calculated partitions are DAX and stay. */
 export function withoutSourceQueries(text: string): string {
@@ -192,7 +198,7 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
       continue
     }
     hash.update(part.path).update('\0').update(text).update('\0')
-    semantic.update(part.path).update('\0').update(withoutSourceQueries(text)).update('\0')
+    semantic.update(part.path).update('\0').update(withoutDescriptions(withoutSourceQueries(text))).update('\0')
     if (part.path === 'definition/relationships.tmdl') {
       for (const block of text.split(/(?=^relationship\s+)/m).filter((value) => value.startsWith('relationship '))) {
         const from = /^\tfromColumn:\s*(.+)$/m.exec(block)?.[1]

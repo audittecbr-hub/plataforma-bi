@@ -86,8 +86,7 @@ export async function answerFromReportReference(input: {
   const terms = contracts.flatMap(contract => [...contract.metrics.flatMap(metric => [metric.label, ...metric.aliases]),
     ...Object.values(contract.source.regionLabels ?? {})])
   const jobs: ReportQueryJob[] = []
-  const monthly = /mensal|mensais|evolucao|por mes|mes a mes/.test(normalized)
-  const compare = /compar|diferenca|variacao/.test(normalized)
+  const { monthly, compare } = reportQuestionShape(normalized)
   const ranking = /ranking|por regional/.test(normalized)
   const scope = reportScope(input.question, matched[0].contract, terms)
   for (const { contract, metrics } of matched) {
@@ -197,6 +196,17 @@ export async function answerFromReportReference(input: {
       retrievedAt: new Date().toISOString(), refresh: refresh && { status: refresh.status, requestId: refresh.requestId, endTime: refresh.endTime },
       sources: matched.map(({ contract }) => ({ measure: contract.measure, page: contract.page })),
       values: selected.map(({ metricId, label, value, precision, scope }) => ({ metricId, label, value, precision, scope })) } }
+}
+
+/**
+ * Months named in a question form one period unless it asks for a comparison or a series:
+ * "cresceram de agosto para setembro" and "evoluiu no fim de cada mês" need one value per month.
+ */
+export function reportQuestionShape(normalized: string): { monthly: boolean; compare: boolean } {
+  return {
+    monthly: /mensal|mensais|evolu|por mes|mes a mes|cada mes|tendencia/.test(normalized),
+    compare: /compar|diferenca|variacao|versus|\bvs\b|\bx\b|cresc|aument|diminu|queda|\bca(?:iu|iram|ir)\b|\bsubi(?:u|ram)\b|\b(?:melhor|pior)(?:ou|aram)\b/.test(normalized),
+  }
 }
 
 export function canCompareReportFacts(left: ReportFact, right: ReportFact): boolean {
