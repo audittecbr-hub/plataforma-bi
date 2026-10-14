@@ -12,6 +12,18 @@ export function answerContext(explanation: string | undefined, fallback: string)
     ? escapeMarkdown(text) : fallback
 }
 
+/**
+ * Sort keys (AnoMesOrdenacao, Ordem) only order the rows. Shown, they read as numbers ("202.607"):
+ * hide them when another text column already names each row.
+ */
+export function visibleColumns(rows: Record<string, unknown>[]): string[] {
+  const keys = [...new Set(rows.flatMap(row => Object.keys(row)))]
+  const name = (key: string) => key.includes('[') ? key.slice(key.indexOf('[') + 1).replace(/\]$/, '') : key
+  const sortKey = (key: string) => /ordena[cç][aã]o|(?:^|[\s_])ordem$/i.test(name(key))
+  const named = keys.some(key => !sortKey(key) && rows.some(row => typeof row[key] === 'string'))
+  return named ? keys.filter(key => !sortKey(key)) : keys
+}
+
 export function resultValue(value: unknown, format?: NonNullable<PlannedQuery['formats']>[string]): string {
   if (typeof value !== 'number' || !Number.isFinite(value)) return String(value ?? 'Não informado')
   const decimals = format?.decimals ?? 2

@@ -11,7 +11,7 @@ import { expandContextFromPlan, inspectCatalog, normalizeTerm, preloadPlannerCon
 import { mapConcurrent } from './concurrency'
 import { answerFromReportReference, loadReportFacts } from './report-reference'
 import { ReportEvidenceError, validateReportReferences, formatReportValue, type ReportFact } from './report-evidence'
-import { answerContext, formatVerifiedAnswer, resultValue } from './presentation'
+import { answerContext, formatVerifiedAnswer, resultValue, visibleColumns } from './presentation'
 import { biProgress, type BiProgressReporter } from './progress'
 import { escapeMarkdown, SOURCE_SECTION } from './message-format'
 import { isGeneralJobLookup, jobCodeIn, resolveJobContext } from './entity-context'
@@ -101,8 +101,8 @@ function resumoLegivel(results: { purpose: string; rows: Record<string, unknown>
       .replace(/^v(?=[A-Z])/, '').replaceAll('_', ' ').replace(/([a-záéíóúãõ])([A-Z])/g, '$1 $2'))
     const value = (entry: unknown, key: string) => escapeMarkdown(resultValue(entry, result.formats?.[key]
       ?? result.formats?.[key.replace(/^.*\[|\]$/g, '')])).replace(/\r?\n/g, ' · ')
-    const keys = [...new Set(result.rows.flatMap(row => Object.keys(row)))]
-    const content = result.rows.length === 1 ? Object.entries(result.rows[0]).map(([key, entry]) => `- **${label(key)}:** ${value(entry, key)}`).join('\n')
+    const keys = visibleColumns(result.rows)
+    const content = result.rows.length === 1 ? keys.map(key => `- **${label(key)}:** ${value(result.rows[0][key], key)}`).join('\n')
       : [`| ${keys.map(label).join(' | ')} |`, `| ${keys.map(() => '---').join(' | ')} |`,
         ...result.rows.map(row => `| ${keys.map(key => value(row[key], key)).join(' | ')} |`)].join('\n')
     return `${title}\n\n${content}${result.truncated ? '\n\n> ⚠️ Há mais registros. Refine os filtros para consultar o restante; os valores acima são as linhas retornadas.' : ''}`
