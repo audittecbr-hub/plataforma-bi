@@ -5,6 +5,7 @@ import { reportQuestionShape } from '../src/lib/bi-ai/report-reference'
 import { normalizeTerm } from '../src/lib/bi-ai/context'
 import { plannerEffort } from '../src/lib/bi-ai/stages'
 import { executeDaxQuery, PowerBiQueryError, powerBiUserMessage } from '../src/lib/powerbi'
+import { visibleColumns } from '../src/lib/bi-ai/presentation'
 import type { ConfigIa } from '../src/lib/llm-config'
 
 test('um ranking renomeado por SELECTCOLUMNS mantém a ordem do TOPN', () => {
@@ -20,6 +21,15 @@ test('um ranking renomeado por SELECTCOLUMNS mantém a ordem do TOPN', () => {
   assert(boundedReadQuery(`EVALUATE SELECTCOLUMNS(TOPN(2, VALUES('IA Job'[Job]), 'IA Job'[Job], ASC), "Job", 'IA Job'[Job]) ORDER BY [Job] DESC`, 100)
     .endsWith('ORDER BY [Job] DESC'))
   assert(!/ORDER BY/.test(boundedReadQuery(`EVALUATE SELECTCOLUMNS(TOPN(2, VALUES('IA Job'[Job]), [Total Aprovado], DESC), "Job", 'IA Job'[Job])`, 100)))
+})
+
+test('a coluna que só ordena os meses não aparece na tabela da resposta', () => {
+  const meses = [{ 'Calendario[AnoMesOrdenacao]': 202607, 'Calendario[MesAno]': 'Julho/2026', '[Conversão NNCO]': 0.2986 },
+    { 'Calendario[AnoMesOrdenacao]': 202608, 'Calendario[MesAno]': 'Agosto/2026', '[Conversão NNCO]': 0.3032 }]
+  assert.deepEqual(visibleColumns(meses), ['Calendario[MesAno]', '[Conversão NNCO]'])
+  assert.deepEqual(visibleColumns([{ "'IA Área'[Ordem]": 1, "'IA Área'[Área]": 'GS', '[Meta 1]': 10 }]), ["'IA Área'[Área]", '[Meta 1]'])
+  // Sem outra coluna de texto, a ordem é a única identificação da linha e continua visível.
+  assert.deepEqual(visibleColumns([{ 'Calendario[AnoMesOrdenacao]': 202607, '[Valor]': 1 }]), ['Calendario[AnoMesOrdenacao]', '[Valor]'])
 })
 
 test('comparações e séries pedem um valor por mês no caminho dos visuais', () => {
