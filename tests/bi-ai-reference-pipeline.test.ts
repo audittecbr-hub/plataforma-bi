@@ -8,7 +8,7 @@ import { publishedSchema } from '../src/lib/bi-ai/fabric-context'
 
 test('published evidence ignores invented output; new filters and changed reports use live analysis', async () => {
   const originalFetch = globalThis.fetch
-  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://evidence-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key-long-enough-for-clarification',
+  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://evidence-test.supabase.co', BI_AI_PERSISTENT_CACHE: 'off', SUPABASE_SERVICE_ROLE_KEY: 'test-service-key-long-enough-for-clarification',
     OPENCODE_API_KEY: 'test-provider-key', POWERBI_TENANT: 'test-tenant', POWERBI_CLIENT_ID: 'test-client', POWERBI_CLIENT_SECRET: 'test-secret' }
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
   Object.assign(process.env, env)
@@ -46,8 +46,10 @@ test('published evidence ignores invented output; new filters and changed report
       if (url.endsWith('/chat/completions')) {
         calls++
         const body = JSON.parse(String(init?.body))
-        assert.equal(body.reasoning_effort, 'max')
-        assert.equal(body.max_tokens, 393216)
+        const planning = body.messages[0].content.startsWith('Planeje DAX')
+        assert.equal(body.reasoning_effort, planning ? 'max' : undefined)
+        assert.equal(body.thinking.type, planning ? 'enabled' : 'disabled')
+        assert.equal(body.max_tokens, planning ? 32000 : 6000)
         if (body.messages[0].content.startsWith('Planeje DAX')) return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant',
           content: JSON.stringify(toolMode ? { action: 'report-facts', mode: 'answer', requests: [
             { measure: 'Card', metricIds: ['revenue'], scope: { months: ['2026-10'], region: null } },
@@ -105,6 +107,8 @@ test('published evidence ignores invented output; new filters and changed report
     const firstReference = (manifest.raw.reportReferences as Record<string, unknown>[])[0]
     const multi = { ...manifest, raw: { ...manifest.raw, reportReferences: [firstReference, { ...firstReference, measure: 'Card2',
       metrics: [{ id: 'expense', label: 'Despesa realizada', aliases: ['despesa'], format: 'currency', expression: { op: 'html-text', label: 'REALIZADO', slot: 'currency' } }] }] } }
+    // The definition was restored after the changed-report case; the snapshot sync brings it back.
+    await withAiRequestCache(() => publishedSchema(workspaceId, semanticModelId, reportId, true))
     const multiResult = await withAiRequestCache(() => answerBiQuestion({
       manifest: multi, dashboard: { id: '44444444-4444-4444-8444-444444444444', name: 'BI de teste', department: 'Diretoria',
         allowed_departments: [], assigned_user_id: null, sub_group: null }, userId: '55555555-5555-4555-8555-555555555555',

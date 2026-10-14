@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+﻿import { createHash } from 'node:crypto'
 import { asRecord, safeMetadataText, safeText, type BiManifest } from './manifest'
 import type { SelectedContext } from './context'
 import { sourceVariables, type DaxSemanticSource } from './dax-source'
@@ -14,6 +14,11 @@ export interface PublishedPageMap {
 
 export interface PublishedSchema {
   modelHash: string
+  /**
+   * Same as modelHash without the Power Query source of import partitions: republishing a model
+   * only to point it at another database or file keeps every measure and visual contract valid.
+   */
+  semanticHash?: string
   reportHash?: string
   /** Descrição do modelo escrita no TMDL. Em modelos bem documentados carrega as regras de arquitetura. */
   modelDescription: string
@@ -143,6 +148,21 @@ function tmdlDescription(text: string, max = 4000): string {
 }
 
 /** Parse only semantic metadata. Never pass partitions, M queries or connections to the LLM. */
+/** Removes import (Power Query) partitions; calculated partitions are DAX and stay. */
+export function withoutSourceQueries(text: string): string {
+  const kept: string[] = []
+  let skipping = false
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\tpartition\s.+=\s*m\s*$/.test(line)) { skipping = true; continue }
+    if (skipping) {
+      if (line.trim() === '' || line.startsWith('\t\t')) continue
+      skipping = false
+    }
+    kept.push(line)
+  }
+  return kept.join('\n')
+}
+
 export function parsePublishedSchema(modelParts: FabricPart[], reportParts: FabricPart[] = []): PublishedSchema {
   if (modelParts.length > 200 || reportParts.length > 1000) throw new PublishedSchemaError('Definição Fabric grande demais.')
   const measures: PublishedMeasure[] = []
@@ -152,6 +172,7 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
   const pageNames = new Map<string, string>()
   const visuals: PublishedSchema['visuals'] = []
   const hash = createHash('sha256')
+  const semantic = createHash('sha256')
   const reportHash = createHash('sha256')
   for (const part of [...reportParts].sort((a, b) => a.path.localeCompare(b.path))) {
     reportHash.update(part.path).update(part.payloadType).update(part.payload)
@@ -171,6 +192,7 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
       continue
     }
     hash.update(part.path).update('\0').update(text).update('\0')
+    semantic.update(part.path).update('\0').update(withoutSourceQueries(text)).update('\0')
     if (part.path === 'definition/relationships.tmdl') {
       for (const block of text.split(/(?=^relationship\s+)/m).filter((value) => value.startsWith('relationship '))) {
         const from = /^\tfromColumn:\s*(.+)$/m.exec(block)?.[1]
@@ -229,7 +251,7 @@ export function parsePublishedSchema(modelParts: FabricPart[], reportParts: Fabr
     }))
     .filter((page) => page.visuals.length || page.slicers.length)
   if (!measures.length || !modelColumns.length) throw new PublishedSchemaError('O Fabric não devolveu medidas e colunas do modelo.')
-  return { modelHash: hash.digest('hex'), reportHash: reportHash.digest('hex'), modelDescription, measures, columns: modelColumns,
+  return { modelHash: hash.digest('hex'), semanticHash: semantic.digest('hex'), reportHash: reportHash.digest('hex'), modelDescription, measures, columns: modelColumns,
     relationships: relationships.slice(0, 50), pages: pages.slice(0, 100), reportMap, visualCount, visuals }
 }
 

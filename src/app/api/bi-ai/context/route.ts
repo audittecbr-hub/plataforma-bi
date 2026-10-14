@@ -15,7 +15,7 @@ async function contextRequest(request: Request): Promise<Response> {
     const dashboardId = new URL(request.url).searchParams.get('dashboardId') ?? ''
     const { dashboard } = await authorizedDashboard(dashboardId)
     try {
-      const [manifest, config] = await Promise.all([manifestForDashboard(dashboard), lerConfigIa()])
+      const [manifest, config] = await Promise.all([manifestForDashboard(dashboard, false), lerConfigIa()])
       const ready = config.enabled && await providerReady(config)
       return Response.json({
         enabled: ready,

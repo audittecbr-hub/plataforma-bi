@@ -9,6 +9,8 @@ import { encryptionConfigured, readProviderSettings, removeStoredProviderKey,
   setModelEnabled, setProviderEnabled, storeProviderKey } from '@/lib/ai-keyring'
 import { isReasoningEffort, modelSupportedByAdapter, reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
 import { manifestForDashboard, previewLiveManifest } from '@/lib/bi-ai/registry'
+import { publishedSchema } from '@/lib/bi-ai/fabric-context'
+import { liveCatalog } from '@/lib/bi-ai/live-model'
 
 async function requireAdminId(): Promise<string> {
   const supabase = await createClient()
@@ -182,5 +184,26 @@ export async function toggleDashboardAi(dashboardId: string, enabled: boolean) {
   const { error: updateError } = await admin.from('dashboards').update({ ai_enabled: enabled }).eq('id', dashboardId)
   if (updateError) return { ok: false, error: 'Não foi possível atualizar o dashboard.' }
   revalidatePath('/dashboard/admin')
+  return { ok: true }
+}
+
+/**
+ * Reads every AI-enabled model and report live and refreshes the synchronized snapshot the chat uses.
+ * The snapshot also refreshes itself every 15 minutes; this is for right after a publication.
+ */
+export async function resyncAiSnapshots() {
+  await requireAdminId()
+  const { data, error } = await createAdminClient().from('dashboards').select('id, name, workspace_id, dataset_id, report_id').eq('ai_enabled', true)
+  if (error) return { ok: false, error: 'Não foi possível listar os dashboards com IA.' }
+  const linked = (data ?? []).filter((dashboard) => dashboard.workspace_id && dashboard.dataset_id)
+  const results = await Promise.allSettled(linked.map((dashboard) => Promise.all([
+    publishedSchema(dashboard.workspace_id!, dashboard.dataset_id!, dashboard.report_id ?? null, true),
+    liveCatalog(dashboard.workspace_id!, dashboard.dataset_id!, undefined, true),
+  ])))
+  const failed = linked.filter((_, index) => results[index].status === 'rejected').map((dashboard) => dashboard.name)
+  if (failed.length) {
+    console.error('[ai admin] resync failed:', failed.join(', '))
+    return { ok: false, error: `Não foi possível ressincronizar: ${failed.join(', ')}. Use o Diagnóstico de cada um.` }
+  }
   return { ok: true }
 }

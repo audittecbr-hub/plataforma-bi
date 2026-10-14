@@ -15,7 +15,7 @@ import { Switch } from '@/components/ui/switch'
 import { reasoningOptions, type ReasoningEffort } from '@/lib/ai-reasoning'
 import {
   deleteAiProviderKey, getAiAdminState, listAiModels, saveAiGlobal, saveAiProviderKey,
-  testAiModel, toggleAiModel, toggleAiProvider, toggleDashboardAi,
+  resyncAiSnapshots, testAiModel, toggleAiModel, toggleAiProvider, toggleDashboardAi,
 } from '@/app/dashboard/admin/ai-actions'
 
 type Snapshot = Awaited<ReturnType<typeof getAiAdminState>>
@@ -113,6 +113,10 @@ export function IaTab({ initial }: { initial: Snapshot }) {
       }))
       setModels((old) => old.map((entry) => entry.id === id ? { ...entry, enabled: next, disponivel: entry.supported && next } : entry))
     }
+  }
+
+  async function resync() {
+    await run('resync', resyncAiSnapshots, 'Definições dos modelos com IA sincronizadas.')
   }
 
   async function changeDashboard(id: string, next: boolean) {
@@ -238,7 +242,8 @@ export function IaTab({ initial }: { initial: Snapshot }) {
 
     <Panel>
       <PanelHeader icon={ShieldCheck} eyebrow="Por relatório" title="Chat IA nos dashboards"
-        description="Ative o acesso ao modelo completo. Os indicadores são conferidos com o relatório; perguntas sem indicador ou filtros definidos pedem esclarecimento." />
+        description="Ative o acesso ao modelo completo. Os indicadores são conferidos com o relatório; perguntas sem indicador ou filtros definidos pedem esclarecimento. As definições dos modelos se sincronizam a cada 15 minutos; depois de publicar um modelo, use Ressincronizar IA."
+        actions={<Button type="button" variant="secondary" onClick={resync} disabled={!!busy}>{busy === 'resync' ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw />} Ressincronizar IA</Button>} />
       <div className="space-y-3 border-t px-5 py-5 md:px-6">
         <Input type="search" value={dashboardSearch} onChange={(event) => setDashboardSearch(event.target.value)} placeholder="Buscar dashboard…" aria-label="Buscar dashboard" className="max-w-sm" />
         <div className="max-h-[32rem] divide-y overflow-y-auto rounded-[8px] border">

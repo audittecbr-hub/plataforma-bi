@@ -63,6 +63,8 @@ export interface RefreshHistoryItem {
 // Cache de token em memória para evitar chamadas redundantes ao Azure AD
 // O token tem validade de 3600s — reutilizado entre requisições do mesmo processo
 const _tokenCache = new Map<string, { value: string; expiresAt: number }>()
+// Parallel reads (INFO.VIEW, DAX) share the pending request instead of each asking Entra.
+const _tokenPending = new Map<string, Promise<string>>()
 
 /** Obtém o Bearer Token do Azure AD via client_credentials flow (com cache de 1h) */
 async function getAccessToken(scope = 'https://analysis.windows.net/powerbi/api/.default'): Promise<string> {
@@ -71,6 +73,14 @@ async function getAccessToken(scope = 'https://analysis.windows.net/powerbi/api/
     if (cached && Date.now() < cached.expiresAt) {
         return cached.value
     }
+    const pending = _tokenPending.get(scope)
+    if (pending) return pending
+    const request = requestAccessToken(scope).finally(() => _tokenPending.delete(scope))
+    _tokenPending.set(scope, request)
+    return request
+}
+
+async function requestAccessToken(scope: string): Promise<string> {
 
     const tenant = process.env.POWERBI_TENANT
     const clientId = process.env.POWERBI_CLIENT_ID

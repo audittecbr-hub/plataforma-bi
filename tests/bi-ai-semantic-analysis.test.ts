@@ -7,6 +7,7 @@ import { inspectCatalog, preloadPlannerContext, selectContext } from '../src/lib
 import { parsePublishedSchema, withPublishedSchema } from '../src/lib/bi-ai/fabric-schema'
 import { parsePlan, trimResults } from '../src/lib/bi-ai/plan'
 import { answerBiQuestion } from '../src/lib/bi-ai/pipeline'
+import { publishedSchema } from '../src/lib/bi-ai/fabric-context'
 import { withAiRequestCache } from '../src/lib/ai-request-cache'
 import { issueAnalysisCheckpoint, readAnalysisCheckpoint } from '../src/lib/bi-ai/analysis-checkpoint'
 
@@ -90,7 +91,7 @@ test('read expressions retain filters and sorting, and all fields survive the an
 
 test('a new analytical question explores real rows and then executes the published rule without a whitelist', async () => {
   const originalFetch = globalThis.fetch
-  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://semantic-test.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'semantic-test-secret-long-enough',
+  const env = { NEXT_PUBLIC_SUPABASE_URL: 'https://semantic-test.supabase.co', BI_AI_PERSISTENT_CACHE: 'off', BI_AI_REVIEW_POLICY: 'sempre', SUPABASE_SERVICE_ROLE_KEY: 'semantic-test-secret-long-enough',
     OPENCODE_API_KEY: 'test-key', POWERBI_TENANT: 'test-tenant', POWERBI_CLIENT_ID: 'test-client', POWERBI_CLIENT_SECRET: 'test-secret' }
   const saved = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]])); Object.assign(process.env, env)
   const json = (body: unknown) => new Response(JSON.stringify(body), { headers: { 'Content-Type': 'application/json' } })
@@ -109,7 +110,8 @@ test('a new analytical question explores real rows and then executes the publish
       if (url.endsWith('/models')) return json({ data: [{ id: 'deepseek-v4.1-flash', max_output_tokens: 393216 }] })
       if (url.endsWith('/chat/completions')) {
         const body = JSON.parse(String(init?.body))
-        assert.equal(body.reasoning_effort, 'max')
+        // The explanation only words verified rows; planning and review keep the administrator's effort.
+        assert.equal(body.reasoning_effort, body.messages[0].content.startsWith('Explique em português') ? undefined : 'max')
         if (body.messages[0].content.startsWith('Explique em português')) {
           explanations++
           return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify({
@@ -142,7 +144,11 @@ test('a new analytical question explores real rows and then executes the publish
         return json({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(content) } }], usage: { total_tokens: 10 } })
       }
       if (url.endsWith('/executeQueries')) {
-        if (changeModelDuring) modelChanged = true
+        if (changeModelDuring && !modelChanged) {
+          // A republication reaches the server through the snapshot sync (background revalidation or admin resync).
+          modelChanged = true
+          await publishedSchema(manifest.workspaceId, manifest.semanticModelId, manifest.reportId, true)
+        }
         reads++
         const dax = JSON.parse(String(init?.body)).queries[0].query as string
         if (changeDuring) refreshVersion = 'v2'
