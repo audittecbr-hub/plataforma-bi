@@ -193,7 +193,8 @@ function confereNumero(esperado: number, formato: Formato | undefined, toleranci
   return melhor
 }
 
-const normalizar = (texto: string) => texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+// A resposta é Markdown: "TAX\_OPE\_02" na tela é "TAX_OPE_02".
+const normalizar = (texto: string) => texto.replace(/\\([\\`*_{}[\]()#+\-.!|])/g, '$1').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
 function chaveLimpa(chave: string): string {
   return chave.includes('[') ? chave.slice(chave.lastIndexOf('[') + 1).replace(/\]$/, '') : chave
